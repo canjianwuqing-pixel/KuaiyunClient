@@ -157,16 +157,27 @@ public sealed class MihomoService : IMihomoService, IDisposable
     public Task<IReadOnlyList<ProxyNode>> GetNodesAsync(
         CancellationToken cancellationToken = default)
     {
-        MihomoApiClient apiClient = RequireApiClient();
-        return apiClient.GetNodesAsync(cancellationToken);
+        return RequireApiClient().GetNodesAsync(cancellationToken);
     }
 
     public Task SelectNodeAsync(
         ProxyNode node,
         CancellationToken cancellationToken = default)
     {
-        MihomoApiClient apiClient = RequireApiClient();
-        return apiClient.SelectNodeAsync(node, cancellationToken);
+        return RequireApiClient().SelectNodeAsync(node, cancellationToken);
+    }
+
+    public Task<int?> TestDelayAsync(
+        ProxyNode node,
+        string testUrl,
+        int timeoutMilliseconds,
+        CancellationToken cancellationToken = default)
+    {
+        return RequireApiClient().TestDelayAsync(
+            node,
+            testUrl,
+            timeoutMilliseconds,
+            cancellationToken);
     }
 
     private MihomoApiClient RequireApiClient()
@@ -303,7 +314,7 @@ public sealed class MihomoService : IMihomoService, IDisposable
             }
             catch (ObjectDisposedException)
             {
-                // 进程结束时输出事件可能晚于日志关闭，忽略即可。
+                // 进程结束时输出事件可能晚于日志关闭。
             }
         }
 
