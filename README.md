@@ -10,16 +10,65 @@
 - 登录页、首页、节点页、设置页
 - `BootstrapConfig` 与 OSS `AppConfig` 模型
 - 用户会话和节点模型
-- OSS 配置、V2Board、Mihomo、Windows 系统代理、更新服务接口
+- 多 OSS 配置读取与本地缓存回退
+- V2Board、Mihomo、Windows 系统代理、更新服务接口
 - GitHub Actions Windows 编译检查
 
-当前只搭建框架，尚未接入真实 V2Board 请求、订阅解析、Mihomo 内核、系统代理实现、自动更新和内置代理恢复逻辑。
+当前尚未接入真实 V2Board 请求、订阅解析、Mihomo 内核、系统代理实现、自动更新和内置代理恢复逻辑。
+
+## 配置读取流程
+
+```text
+启动客户端
+→ 读取程序目录中的 bootstrap.json
+→ 缓存仍在有效期内时直接使用缓存
+→ 缓存过期后按顺序访问多个 OSS config.json
+→ 首个有效配置写入本地缓存
+→ 所有 OSS 失败时使用旧缓存
+→ OSS 和缓存都不可用时显示配置错误
+```
+
+本地缓存路径：
+
+```text
+%LocalAppData%\KuaiyunClient\config\config-cache.json
+```
 
 ## 配置原则
 
 - 安装包内的 `bootstrap.json`：只保存多个 OSS 配置地址和刷新间隔。
 - OSS 的 `config.json`：只保存品牌、API 地址、客服、更新地址和 `BuiltInProxy`。
 - 后台固定使用 V2Board，订阅格式固定使用 `meta`，不再放入 OSS 配置。
+
+## bootstrap.json 示例
+
+```json
+{
+  "CloudConfig": [
+    "https://software.lvoeky.com/config.json",
+    "https://备用OSS/config.json"
+  ],
+  "CloudUpdateHours": 3
+}
+```
+
+## OSS config.json 示例
+
+```json
+{
+  "AppName": "快云加速",
+  "AppLogo": "https://software.lvoeky.com/logo.png",
+  "HomePage": "https://lvoeky.com",
+  "TelegramGroup": "https://t.me/kuaiyunjs",
+  "SupportApi": "crisp://替换为你的TOKEN",
+  "UpdateUrl": "https://software.lvoeky.com/update.json",
+  "UserAgent": "kuaiyun",
+  "RemoteHosts": [
+    "https://love.kuaiyun51.org"
+  ],
+  "BuiltInProxy": []
+}
+```
 
 ## 项目结构
 
@@ -52,7 +101,7 @@ dotnet build .\src\KuaiyunClient\KuaiyunClient.csproj -c Release
 
 ## 下一步
 
-1. 实现 OSS 多地址读取与本地缓存。
-2. 实现 V2Board 登录和用户信息。
-3. 下载订阅并解析真实节点。
-4. 接入 Mihomo、节点切换和 Windows 系统代理。
+1. 实现 V2Board 登录和用户信息。
+2. 下载订阅并解析真实节点。
+3. 接入 Mihomo、节点切换和 Windows 系统代理。
+4. 实现自动更新与内置代理恢复逻辑。
