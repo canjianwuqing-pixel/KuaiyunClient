@@ -6,6 +6,9 @@ namespace KuaiyunClient.Services;
 
 public sealed class MihomoService : IMihomoService, IDisposable
 {
+    private static readonly TimeSpan ConfigValidationTimeout = TimeSpan.FromSeconds(25);
+    private static readonly TimeSpan ControllerStartupTimeout = TimeSpan.FromSeconds(45);
+
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly object _logGate = new();
     private readonly MihomoConfigService _configService = new();
@@ -52,7 +55,7 @@ public sealed class MihomoService : IMihomoService, IDisposable
             {
                 throw new MihomoCoreNotFoundException(
                     $"缺少 Mihomo 内核：{_corePath}{Environment.NewLine}" +
-                    "请先运行 scripts/download-mihomo.ps1，或使用 GitHub Actions 构建包。");
+                    "请重新安装快云客户端，或使用完整的 GitHub Actions 构建包。");
             }
 
             MihomoRuntimeConfig runtime = await _configService.WriteAsync(
@@ -60,40 +63,29 @@ public sealed class MihomoService : IMihomoService, IDisposable
                 cancellationToken);
 
             OpenLogWriter(runtime.LogPath);
-            WriteLog("正在启动 Mihomo。", isError: false);
-
-            ProcessStartInfo startInfo = new()
-            {
-                FileName = _corePath,
-                WorkingDirectory = runtime.RuntimeDirectory,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8
-            };
-
-            startInfo.ArgumentList.Add("-d");
-            startInfo.ArgumentList.Add(runtime.RuntimeDirectory);
-            startInfo.ArgumentList.Add("-f");
-            startInfo.ArgumentList.Add(runtime.ConfigPath);
-
-            Process process = new()
-            {
-                StartInfo = startInfo,
-                EnableRaisingEvents = true
-            };
-
-            process.OutputDataReceived += Process_OutputDataReceived;
-            process.ErrorDataReceived += Process_ErrorDataReceived;
-            process.Exited += Process_Exited;
-
-            _stopping = false;
-            _process = process;
+            WriteLog(
+                $"准备启动 Mihomo。代理端口：127.0.0.1:{runtime.MixedPort}；"
+                + $"Controller：127.0.0.1:{runtime.ControllerPort}。",
+                isError: false);
 
             try
             {
+                await ValidateConfigAsync(runtime, cancellationToken);
+
+                ProcessStartInfo startInfo = CreateStartInfo(runtime, testConfiguration: false);
+                Process process = new()
+                {
+                    StartInfo = startInfo,
+                    EnableRaisingEvents = true
+                };
+
+                process.OutputDataReceived += Process_OutputDataReceived;
+                process.ErrorDataReceived += Process_ErrorDataReceived;
+                process.Exited += Process_Exited;
+
+                _stopping = false;
+                _process = process;
+
                 if (!process.Start())
                 {
                     throw new MihomoStartException("Windows 未能启动 Mihomo 进程。");
@@ -104,7 +96,7 @@ public sealed class MihomoService : IMihomoService, IDisposable
 
                 _apiClient = new MihomoApiClient(runtime.ControllerPort, runtime.Secret);
                 await _apiClient.WaitUntilReadyAsync(
-                    TimeSpan.FromSeconds(15),
+                    ControllerStartupTimeout,
                     cancellationToken);
 
                 if (process.HasExited)
@@ -114,23 +106,18 @@ public sealed class MihomoService : IMihomoService, IDisposable
                 }
 
                 WriteLog(
-                    $"Mihomo 已就绪，混合端口 127.0.0.1:{runtime.MixedPort}。",
+                    $"Mihomo 已就绪，混合端口 127.0.0.1:{runtime.MixedPort}，"
+                    + $"Controller 端口 {runtime.ControllerPort}。",
                     isError: false);
             }
             catch (Exception ex)
             {
-                string recentLog = ReadRecentLogLines(12);
-                await StopProcessNoLockAsync(CancellationToken.None);
+                await Task.Delay(250, CancellationToken.None);
+                string recentLog = ReadRecentLogLines(30);
+                string message = BuildStartupFailureMessage(ex, runtime, recentLog);
 
-                throw new MihomoStartException(
-                    string.IsNullOrWhiteSpace(recentLog)
-                        ? "Mihomo 启动失败：" + ex.Message
-                        : "Mihomo 启动失败：" + ex.Message
-                          + Environment.NewLine
-                          + "最近日志："
-                          + Environment.NewLine
-                          + recentLog,
-                    ex);
+                await StopProcessNoLockAsync(CancellationToken.None);
+                throw new MihomoStartException(message, ex);
             }
         }
         finally
@@ -178,6 +165,96 @@ public sealed class MihomoService : IMihomoService, IDisposable
             testUrl,
             timeoutMilliseconds,
             cancellationToken);
+    }
+
+    private async Task ValidateConfigAsync(
+        MihomoRuntimeConfig runtime,
+        CancellationToken cancellationToken)
+    {
+        WriteLog("正在验证 Mihomo 运行配置...", isError: false);
+
+        using Process process = new()
+        {
+            StartInfo = CreateStartInfo(runtime, testConfiguration: true)
+        };
+
+        if (!process.Start())
+        {
+            throw new MihomoConfigurationException("Windows 未能启动 Mihomo 配置验证进程。");
+        }
+
+        Task<string> standardOutputTask = process.StandardOutput.ReadToEndAsync();
+        Task<string> standardErrorTask = process.StandardError.ReadToEndAsync();
+
+        using CancellationTokenSource timeoutSource =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(ConfigValidationTimeout);
+
+        try
+        {
+            await process.WaitForExitAsync(timeoutSource.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            TryKillProcess(process);
+            throw new MihomoConfigurationException(
+                $"Mihomo 配置验证超过 {ConfigValidationTimeout.TotalSeconds:0} 秒，已终止验证。");
+        }
+
+        string standardOutput = await standardOutputTask;
+        string standardError = await standardErrorTask;
+        string diagnostics = CombineProcessOutput(standardOutput, standardError);
+
+        if (process.ExitCode != 0)
+        {
+            throw new MihomoConfigurationException(
+                "订阅生成的 Mihomo 配置无效。"
+                + Environment.NewLine
+                + $"退出代码：{process.ExitCode}"
+                + (string.IsNullOrWhiteSpace(diagnostics)
+                    ? string.Empty
+                    : Environment.NewLine + diagnostics));
+        }
+
+        if (!string.IsNullOrWhiteSpace(diagnostics))
+        {
+            foreach (string line in diagnostics.Split(
+                         ['\r', '\n'],
+                         StringSplitOptions.RemoveEmptyEntries))
+            {
+                WriteLog("配置验证：" + line, isError: false);
+            }
+        }
+
+        WriteLog("Mihomo 配置验证通过。", isError: false);
+    }
+
+    private ProcessStartInfo CreateStartInfo(
+        MihomoRuntimeConfig runtime,
+        bool testConfiguration)
+    {
+        ProcessStartInfo startInfo = new()
+        {
+            FileName = _corePath,
+            WorkingDirectory = runtime.RuntimeDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+
+        if (testConfiguration)
+        {
+            startInfo.ArgumentList.Add("-t");
+        }
+
+        startInfo.ArgumentList.Add("-d");
+        startInfo.ArgumentList.Add(runtime.RuntimeDirectory);
+        startInfo.ArgumentList.Add("-f");
+        startInfo.ArgumentList.Add(runtime.ConfigPath);
+        return startInfo;
     }
 
     private MihomoApiClient RequireApiClient()
@@ -325,6 +402,11 @@ public sealed class MihomoService : IMihomoService, IDisposable
     {
         try
         {
+            lock (_logGate)
+            {
+                _logWriter?.Flush();
+            }
+
             if (!File.Exists(LogPath))
             {
                 return string.Empty;
@@ -337,6 +419,61 @@ public sealed class MihomoService : IMihomoService, IDisposable
         catch (IOException)
         {
             return string.Empty;
+        }
+    }
+
+    private static string BuildStartupFailureMessage(
+        Exception exception,
+        MihomoRuntimeConfig runtime,
+        string recentLog)
+    {
+        StringBuilder message = new();
+        message.Append("Mihomo 启动失败：").AppendLine(exception.Message);
+
+        if (exception.InnerException is not null
+            && !string.Equals(
+                exception.InnerException.Message,
+                exception.Message,
+                StringComparison.Ordinal))
+        {
+            message.Append("内部原因：")
+                .AppendLine(exception.InnerException.Message);
+        }
+
+        message.Append("运行配置：").AppendLine(runtime.ConfigPath);
+        message.Append("运行日志：").Append(runtime.LogPath);
+
+        if (!string.IsNullOrWhiteSpace(recentLog))
+        {
+            message.AppendLine()
+                .AppendLine("最近日志：")
+                .Append(recentLog);
+        }
+
+        return message.ToString();
+    }
+
+    private static string CombineProcessOutput(string standardOutput, string standardError)
+    {
+        return string.Join(
+            Environment.NewLine,
+            new[] { standardOutput.Trim(), standardError.Trim() }
+                .Where(value => !string.IsNullOrWhiteSpace(value)));
+    }
+
+    private static void TryKillProcess(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(3000);
+            }
+        }
+        catch
+        {
+            // 超时清理阶段尽最大努力终止即可。
         }
     }
 
