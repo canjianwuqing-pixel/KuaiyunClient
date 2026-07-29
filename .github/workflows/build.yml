@@ -25,6 +25,10 @@ jobs:
         shell: pwsh
         run: .\scripts\download-mihomo.ps1
 
+      - name: Download offline country flags
+        shell: pwsh
+        run: .\scripts\download-flags.ps1
+
       - name: Build
         shell: pwsh
         run: dotnet build .\src\KuaiyunClient\KuaiyunClient.csproj -c Release
@@ -54,7 +58,11 @@ jobs:
             "$package\core\mihomo.exe",
             "$package\core\geoip.metadb",
             "$package\core\geosite.dat",
-            "$package\core\version.txt"
+            "$package\core\version.txt",
+            "$package\Assets\Flags\us.png",
+            "$package\Assets\Flags\jp.png",
+            "$package\Assets\Flags\hk.png",
+            "$package\Assets\Flags\unknown.png"
           )
 
           foreach ($path in $required) {
@@ -77,6 +85,11 @@ jobs:
             }
           }
 
+          $flagCount = (Get-ChildItem "$package\Assets\Flags" -Filter "*.png" -File).Count
+          if ($flagCount -lt 200) {
+            throw "Only $flagCount flag images were packaged."
+          }
+
           $topLevelFiles = Get-ChildItem $package -File
           $unexpected = $topLevelFiles | Where-Object {
             $_.Name -notin @("KuaiyunClient.exe", "bootstrap.json")
@@ -87,11 +100,7 @@ jobs:
             throw "Unexpected top-level package files: $names"
           }
 
-          Write-Host "Compact package with offline Geo data verified."
-          Write-Host "Top-level files: $($topLevelFiles.Name -join ', ')"
-          Get-ChildItem "$package\core" -File | ForEach-Object {
-            Write-Host "core/$($_.Name): $([Math]::Round($_.Length / 1MB, 2)) MB"
-          }
+          Write-Host "Compact package with offline Geo and $flagCount flag images verified."
 
       - name: Run packaged offline startup self-test
         shell: pwsh
@@ -171,13 +180,13 @@ jobs:
       - name: Upload portable Windows package
         uses: actions/upload-artifact@v4
         with:
-          name: KuaiyunClient-v0.1.2-win-x64-portable
+          name: KuaiyunClient-v0.2.0-win-x64-portable
           path: artifacts/KuaiyunClient-win-x64/
           if-no-files-found: error
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: KuaiyunClient-v0.1.2-Setup
+          name: KuaiyunClient-v0.2.0-Setup
           path: artifacts/installer/KuaiyunClient-Setup.exe
           if-no-files-found: error
