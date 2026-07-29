@@ -24,11 +24,23 @@ jobs:
         env:
           TARGET_BRANCH: ${{ github.head_ref }}
         run: |
-          $payload = (Get-ChildItem ".github/update-parts" -Filter "part*.txt" -File |
+          $rawPayload = (Get-ChildItem ".github/update-parts" -Filter "part*.txt" -File |
             Sort-Object Name |
             ForEach-Object { Get-Content $_.FullName -Raw }) -join ""
+          $payload = [regex]::Replace($rawPayload, '[^A-Za-z0-9+/=]', '')
+          Write-Host "Raw payload length: $($rawPayload.Length)"
+          Write-Host "Sanitized payload length: $($payload.Length)"
+          if ($payload.Length -ne 71604) {
+            throw "Unexpected payload length: $($payload.Length), expected 71604."
+          }
+
           $zip = Join-Path $env:RUNNER_TEMP "kuaiyun-v0.3.0-update.zip"
           [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($payload))
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne "1dd26db5ca802c20df6de464591ebf65d0e38c76c55338d2ee6f0feb63b53f38") {
+            throw "Source archive SHA256 mismatch: $hash"
+          }
+
           Expand-Archive -Path $zip -DestinationPath "." -Force
           Remove-Item ".github/update-parts" -Recurse -Force
           Remove-Item ".github/kuaiyun-v0.3.0-update.zip.b64" -Force -ErrorAction SilentlyContinue
