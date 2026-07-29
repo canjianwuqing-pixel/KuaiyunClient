@@ -20,6 +20,7 @@ public sealed class MihomoConfigService
         "bind-address",
         "mode",
         "log-level",
+        "unified-delay",
         "external-controller",
         "secret"
     };
@@ -73,6 +74,7 @@ allow-lan: false
 bind-address: 127.0.0.1
 mode: rule
 log-level: info
+unified-delay: true
 external-controller: 127.0.0.1:{{ControllerPort}}
 secret: "{{secret}}"
 tun:
