@@ -1,5 +1,4 @@
 using KuaiyunClient.Models;
-using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 
@@ -18,6 +17,7 @@ public sealed class V2BoardApi : IV2BoardApi, IDisposable
 
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
+    private readonly BuiltInProxyService _builtInProxyService = new();
 
     public V2BoardApi(HttpClient? httpClient = null)
     {
@@ -28,6 +28,8 @@ public sealed class V2BoardApi : IV2BoardApi, IDisposable
         };
     }
 
+    public bool LastRequestUsedBuiltInProxy { get; private set; }
+
     public async Task<UserSession> LoginAsync(
         AppConfig config,
         string email,
@@ -35,6 +37,7 @@ public sealed class V2BoardApi : IV2BoardApi, IDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(config);
+        LastRequestUsedBuiltInProxy = false;
 
         string normalizedEmail = email.Trim();
         if (string.IsNullOrWhiteSpace(normalizedEmail))
@@ -47,6 +50,140 @@ public sealed class V2BoardApi : IV2BoardApi, IDisposable
             throw new ArgumentException("密码不能为空。", nameof(password));
         }
 
+        Exception? directError = null;
+        try
+        {
+            return await LoginAcrossHostsAsync(
+                _httpClient,
+                config,
+                normalizedEmail,
+                password,
+                cancellationToken);
+        }
+        catch (V2BoardAuthenticationException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsHostRecoverable(ex, cancellationToken))
+        {
+            directError = ex;
+        }
+
+        if (config.BuiltInProxy.Count == 0)
+        {
+            throw new V2BoardApiException(
+                "所有 V2Board API 地址均无法完成登录。"
+                + Environment.NewLine
+                + (directError?.Message ?? "没有可用的 API 地址。"));
+        }
+
+        try
+        {
+            UserSession session = await _builtInProxyService.ExecuteAsync(
+                config.BuiltInProxy,
+                (client, token) => LoginAcrossHostsAsync(
+                    client,
+                    config,
+                    normalizedEmail,
+                    password,
+                    token),
+                isFatal: ex => ex is V2BoardAuthenticationException,
+                cancellationToken);
+
+            LastRequestUsedBuiltInProxy = true;
+            return session;
+        }
+        catch (V2BoardAuthenticationException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsHostRecoverable(ex, cancellationToken))
+        {
+            throw new V2BoardApiException(
+                "V2Board 登录直连和 BuiltInProxy 应急链路均失败。"
+                + Environment.NewLine
+                + "直连："
+                + (directError?.Message ?? "未知错误")
+                + Environment.NewLine
+                + "应急代理："
+                + ex.Message);
+        }
+    }
+
+    public async Task<string> DownloadSubscriptionAsync(
+        AppConfig config,
+        UserSession session,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(session);
+        LastRequestUsedBuiltInProxy = false;
+
+        if (!Uri.TryCreate(session.SubscriptionUrl, UriKind.Absolute, out Uri? subscriptionUri)
+            || (subscriptionUri.Scheme != Uri.UriSchemeHttp
+                && subscriptionUri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new V2BoardApiException("后台返回的订阅地址无效。");
+        }
+
+        Uri finalUri = AppendQueryParameter(subscriptionUri, "flag", SubscriptionFlag);
+        Exception? directError = null;
+
+        try
+        {
+            return await DownloadSubscriptionWithClientAsync(
+                _httpClient,
+                config,
+                finalUri,
+                cancellationToken);
+        }
+        catch (Exception ex) when (IsHostRecoverable(ex, cancellationToken))
+        {
+            directError = ex;
+        }
+
+        if (config.BuiltInProxy.Count == 0)
+        {
+            throw new V2BoardApiException(
+                "下载订阅失败。"
+                + Environment.NewLine
+                + (directError?.Message ?? "没有可用的应急代理。"));
+        }
+
+        try
+        {
+            string yaml = await _builtInProxyService.ExecuteAsync(
+                config.BuiltInProxy,
+                (client, token) => DownloadSubscriptionWithClientAsync(
+                    client,
+                    config,
+                    finalUri,
+                    token),
+                cancellationToken: cancellationToken);
+
+            LastRequestUsedBuiltInProxy = true;
+            return yaml;
+        }
+        catch (Exception ex) when (IsHostRecoverable(ex, cancellationToken))
+        {
+            throw new V2BoardApiException(
+                "订阅直连和 BuiltInProxy 应急链路均失败。"
+                + Environment.NewLine
+                + "直连："
+                + (directError?.Message ?? "未知错误")
+                + Environment.NewLine
+                + "应急代理："
+                + ex.Message);
+        }
+    }
+
+    private static async Task<UserSession> LoginAcrossHostsAsync(
+        HttpClient client,
+        AppConfig config,
+        string email,
+        string password,
+        CancellationToken cancellationToken)
+    {
         List<string> errors = [];
 
         foreach (string host in config.RemoteHosts)
@@ -54,9 +191,10 @@ public sealed class V2BoardApi : IV2BoardApi, IDisposable
             try
             {
                 return await LoginAgainstHostAsync(
+                    client,
                     config,
                     host,
-                    normalizedEmail,
+                    email,
                     password,
                     cancellationToken);
             }
@@ -75,27 +213,19 @@ public sealed class V2BoardApi : IV2BoardApi, IDisposable
             : string.Join(Environment.NewLine, errors);
 
         throw new V2BoardApiException(
-            "所有 V2Board API 地址均无法完成登录。" + Environment.NewLine + details);
+            "所有 V2Board API 地址均无法完成登录。"
+            + Environment.NewLine
+            + details);
     }
 
-    public async Task<string> DownloadSubscriptionAsync(
+    private static async Task<string> DownloadSubscriptionWithClientAsync(
+        HttpClient client,
         AppConfig config,
-        UserSession session,
-        CancellationToken cancellationToken = default)
+        Uri uri,
+        CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(session);
-
-        if (!Uri.TryCreate(session.SubscriptionUrl, UriKind.Absolute, out Uri? subscriptionUri)
-            || (subscriptionUri.Scheme != Uri.UriSchemeHttp
-                && subscriptionUri.Scheme != Uri.UriSchemeHttps))
-        {
-            throw new V2BoardApiException("后台返回的订阅地址无效。");
-        }
-
-        Uri finalUri = AppendQueryParameter(subscriptionUri, "flag", SubscriptionFlag);
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, finalUri, config.UserAgent);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, uri, config.UserAgent);
+        using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
         string body = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode || string.IsNullOrWhiteSpace(body))
@@ -107,7 +237,8 @@ public sealed class V2BoardApi : IV2BoardApi, IDisposable
         return body;
     }
 
-    private async Task<UserSession> LoginAgainstHostAsync(
+    private static async Task<UserSession> LoginAgainstHostAsync(
+        HttpClient client,
         AppConfig config,
         string host,
         string email,
@@ -120,7 +251,7 @@ public sealed class V2BoardApi : IV2BoardApi, IDisposable
         using HttpRequestMessage loginRequest = CreateRequest(HttpMethod.Post, loginUri, config.UserAgent);
         loginRequest.Content = new StringContent(payload, Encoding.UTF8, "application/json");
 
-        using HttpResponseMessage loginResponse = await _httpClient.SendAsync(loginRequest, cancellationToken);
+        using HttpResponseMessage loginResponse = await client.SendAsync(loginRequest, cancellationToken);
         string loginBody = await loginResponse.Content.ReadAsStringAsync(cancellationToken);
 
         if (!loginResponse.IsSuccessStatusCode)
@@ -145,7 +276,7 @@ public sealed class V2BoardApi : IV2BoardApi, IDisposable
         using HttpRequestMessage subscribeRequest = CreateRequest(HttpMethod.Get, subscribeUri, config.UserAgent);
         subscribeRequest.Headers.TryAddWithoutValidation("Authorization", authData);
 
-        using HttpResponseMessage subscribeResponse = await _httpClient.SendAsync(
+        using HttpResponseMessage subscribeResponse = await client.SendAsync(
             subscribeRequest,
             cancellationToken);
         string subscribeBody = await subscribeResponse.Content.ReadAsStringAsync(cancellationToken);
@@ -339,11 +470,14 @@ public sealed class V2BoardApi : IV2BoardApi, IDisposable
         return exception is HttpRequestException
             or TaskCanceledException
             or JsonException
-            or V2BoardApiException;
+            or FormatException
+            or V2BoardApiException
+            or BuiltInProxyUnavailableException;
     }
 
     public void Dispose()
     {
+        _builtInProxyService.Dispose();
         if (_ownsHttpClient)
         {
             _httpClient.Dispose();
