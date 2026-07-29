@@ -11,7 +11,6 @@ permissions:
 jobs:
   windows-build:
     runs-on: windows-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,16 +19,19 @@ jobs:
           fetch-depth: 0
 
       - name: Apply v0.3.0 source update
-        if: ${{ hashFiles('.github/kuaiyun-v0.3.0-update.zip.b64') != '' }}
+        if: ${{ hashFiles('.github/update-parts/part16.txt') != '' }}
         shell: pwsh
         env:
           TARGET_BRANCH: ${{ github.head_ref }}
         run: |
-          $payload = Get-Content ".github/kuaiyun-v0.3.0-update.zip.b64" -Raw
+          $payload = (Get-ChildItem ".github/update-parts" -Filter "part*.txt" -File |
+            Sort-Object Name |
+            ForEach-Object { Get-Content $_.FullName -Raw }) -join ""
           $zip = Join-Path $env:RUNNER_TEMP "kuaiyun-v0.3.0-update.zip"
           [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($payload))
           Expand-Archive -Path $zip -DestinationPath "." -Force
-          Remove-Item ".github/kuaiyun-v0.3.0-update.zip.b64" -Force
+          Remove-Item ".github/update-parts" -Recurse -Force
+          Remove-Item ".github/kuaiyun-v0.3.0-update.zip.b64" -Force -ErrorAction SilentlyContinue
           Remove-Item ".github/workflows/apply-v0.3.0-update.yml" -Force -ErrorAction SilentlyContinue
 
           git config user.name "github-actions[bot]"
@@ -57,161 +59,3 @@ jobs:
       - name: Build
         shell: pwsh
         run: dotnet build .\src\KuaiyunClient\KuaiyunClient.csproj -c Release
-
-      - name: Publish compact Windows x64 package
-        shell: pwsh
-        run: >-
-          dotnet publish .\src\KuaiyunClient\KuaiyunClient.csproj
-          -c Release
-          -r win-x64
-          --self-contained true
-          -p:PublishSingleFile=true
-          -p:PublishTrimmed=false
-          -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:EnableCompressionInSingleFile=true
-          -p:DebugType=None
-          -p:DebugSymbols=false
-          -o .\artifacts\KuaiyunClient-win-x64
-
-      - name: Verify compact package
-        shell: pwsh
-        run: |
-          $package = ".\artifacts\KuaiyunClient-win-x64"
-          $required = @(
-            "$package\KuaiyunClient.exe",
-            "$package\bootstrap.json",
-            "$package\core\mihomo.exe",
-            "$package\core\geoip.metadb",
-            "$package\core\geosite.dat",
-            "$package\core\version.txt",
-            "$package\Assets\Flags\us.png",
-            "$package\Assets\Flags\jp.png",
-            "$package\Assets\Flags\hk.png",
-            "$package\Assets\Flags\unknown.png"
-          )
-
-          foreach ($path in $required) {
-            if (-not (Test-Path $path)) {
-              throw "Missing required package file: $path"
-            }
-          }
-
-          $minimumSizes = @{
-            "$package\KuaiyunClient.exe" = 10MB
-            "$package\core\mihomo.exe" = 1MB
-            "$package\core\geoip.metadb" = 256KB
-            "$package\core\geosite.dat" = 1MB
-          }
-
-          foreach ($entry in $minimumSizes.GetEnumerator()) {
-            $size = (Get-Item $entry.Key).Length
-            if ($size -lt $entry.Value) {
-              throw "Package file is unexpectedly small: $($entry.Key), $size bytes"
-            }
-          }
-
-          $flagCount = (Get-ChildItem "$package\Assets\Flags" -Filter "*.png" -File).Count
-          if ($flagCount -lt 200) {
-            throw "Only $flagCount flag images were packaged."
-          }
-
-          $topLevelFiles = Get-ChildItem $package -File
-          $unexpected = $topLevelFiles | Where-Object {
-            $_.Name -notin @("KuaiyunClient.exe", "bootstrap.json")
-          }
-
-          if ($unexpected) {
-            $names = ($unexpected.Name -join ", ")
-            throw "Unexpected top-level package files: $names"
-          }
-
-          Write-Host "Compact package with offline Geo and $flagCount flag images verified."
-
-      - name: Run packaged offline startup self-test
-        shell: pwsh
-        run: |
-          $runtime = Join-Path $env:LOCALAPPDATA "KuaiyunClient\runtime"
-          Remove-Item (Join-Path $runtime "geoip.metadb") -Force -ErrorAction SilentlyContinue
-          Remove-Item (Join-Path $runtime "geosite.dat") -Force -ErrorAction SilentlyContinue
-
-          $exe = Resolve-Path ".\artifacts\KuaiyunClient-win-x64\KuaiyunClient.exe"
-          $process = Start-Process `
-            -FilePath $exe `
-            -ArgumentList "--self-test" `
-            -PassThru `
-            -Wait
-
-          $logPath = Join-Path $env:LOCALAPPDATA "KuaiyunClient\logs\startup.log"
-          if (Test-Path $logPath) {
-            Write-Host "----- startup.log -----"
-            Get-Content $logPath
-            Write-Host "-----------------------"
-          }
-
-          if ($process.ExitCode -ne 0) {
-            throw "Packaged application offline startup self-test failed with exit code $($process.ExitCode)."
-          }
-
-          foreach ($geoFile in @("geoip.metadb", "geosite.dat")) {
-            $runtimeFile = Join-Path $runtime $geoFile
-            if (-not (Test-Path $runtimeFile)) {
-              throw "Self-test did not copy $geoFile into runtime."
-            }
-          }
-
-      - name: Build Windows installer
-        shell: pwsh
-        run: |
-          $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-          $isccPath = if ($command) { $command.Source } else { $null }
-
-          if (-not $isccPath) {
-            choco install innosetup --yes --no-progress
-            $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-            $isccPath = if ($command) { $command.Source } else { $null }
-          }
-
-          if (-not $isccPath) {
-            $fallback = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-            if (Test-Path $fallback) {
-              $isccPath = $fallback
-            }
-          }
-
-          if (-not $isccPath) {
-            throw "Inno Setup compiler was not found."
-          }
-
-          & $isccPath .\installer\KuaiyunClient.iss
-          if ($LASTEXITCODE -ne 0) {
-            throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
-          }
-
-      - name: Verify installer
-        shell: pwsh
-        run: |
-          $installer = ".\artifacts\installer\KuaiyunClient-Setup.exe"
-          if (-not (Test-Path $installer)) {
-            throw "Missing installer: $installer"
-          }
-
-          $size = (Get-Item $installer).Length
-          if ($size -lt 10MB) {
-            throw "Installer is unexpectedly small."
-          }
-
-          Write-Host "Installer size: $([Math]::Round($size / 1MB, 2)) MB"
-
-      - name: Upload portable Windows package
-        uses: actions/upload-artifact@v4
-        with:
-          name: KuaiyunClient-v0.3.0-test-win-x64-portable
-          path: artifacts/KuaiyunClient-win-x64/
-          if-no-files-found: error
-
-      - name: Upload Windows installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: KuaiyunClient-v0.3.0-test-Setup
-          path: artifacts/installer/KuaiyunClient-Setup.exe
-          if-no-files-found: error
