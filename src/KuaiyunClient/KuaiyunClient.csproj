@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>KuaiyunClient</AssemblyName>
+    <RootNamespace>KuaiyunClient</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\config\bootstrap.example.json"
+          Link="bootstrap.json"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
