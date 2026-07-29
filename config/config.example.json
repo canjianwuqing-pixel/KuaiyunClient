@@ -1,0 +1,13 @@
+{
+  "AppName": "快云加速",
+  "AppLogo": "https://software.lvoeky.com/logo.png",
+  "HomePage": "https://lvoeky.com",
+  "TelegramGroup": "https://t.me/kuaiyunjs",
+  "SupportApi": "crisp://替换为你的TOKEN",
+  "UpdateUrl": "https://software.lvoeky.com/update.json",
+  "UserAgent": "kuaiyun",
+  "RemoteHosts": [
+    "https://love.kuaiyun51.org"
+  ],
+  "BuiltInProxy": []
+}
