@@ -16,11 +16,15 @@ public partial class ShellWindow : Window
     private readonly ConfigService _configService = new();
     private readonly V2BoardApi _v2BoardApi = new();
     private readonly SubscriptionService _subscriptionService = new();
+    private readonly MihomoService _mihomoService = new();
 
     private AppConfig? _appConfig;
     private UserSession? _userSession;
+    private string? _subscriptionYaml;
+    private ProxyNode? _selectedNode;
     private bool _loginBusy;
     private bool _subscriptionBusy;
+    private bool _connectionBusy;
 
     private static readonly Brush ActiveBrush = new SolidColorBrush(Color.FromRgb(32, 58, 87));
     private static readonly Brush InactiveBrush = Brushes.Transparent;
@@ -32,8 +36,10 @@ public partial class ShellWindow : Window
         InitializeComponent();
 
         _loginView.LoginRequested += LoginView_LoginRequested;
+        _homeView.ConnectionToggleRequested += HomeView_ConnectionToggleRequested;
         _nodesView.RefreshRequested += NodesView_RefreshRequested;
         _nodesView.NodeSelectionRequested += NodesView_NodeSelectionRequested;
+        _mihomoService.Exited += MihomoService_Exited;
 
         HomeNavButton.IsEnabled = false;
         NodesNavButton.IsEnabled = false;
@@ -124,15 +130,126 @@ public partial class ShellWindow : Window
         }
     }
 
+    private async void HomeView_ConnectionToggleRequested(object? sender, EventArgs e)
+    {
+        if (_connectionBusy)
+        {
+            return;
+        }
+
+        _connectionBusy = true;
+
+        try
+        {
+            if (_mihomoService.IsRunning)
+            {
+                _homeView.SetConnectionBusy(true, "正在断开...");
+                await _mihomoService.StopAsync();
+                _homeView.ShowConnectionState(connected: false, _selectedNode?.DisplayName);
+                _nodesView.ShowStatus("Mihomo 已停止。Windows 系统代理未被修改。");
+                return;
+            }
+
+            if (_userSession is null)
+            {
+                _homeView.ShowConnectionError("请先登录账号。");
+                Navigate("Login");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_subscriptionYaml))
+            {
+                _homeView.ShowConnectionError("尚未加载订阅，请先到节点页刷新订阅。");
+                return;
+            }
+
+            if (_selectedNode is null)
+            {
+                _homeView.ShowConnectionError("订阅中没有可连接的节点。");
+                return;
+            }
+
+            _homeView.SetConnectionBusy(true, "正在启动 Mihomo...");
+            await _mihomoService.StartAsync(_subscriptionYaml);
+
+            _homeView.SetConnectionBusy(true, "正在切换节点...");
+            await _mihomoService.SelectNodeAsync(_selectedNode);
+
+            _homeView.ShowConnectionState(connected: true, _selectedNode.DisplayName);
+            _nodesView.ShowStatus(
+                $"已连接：{_selectedNode.DisplayName}。当前仅启动本地代理 127.0.0.1:7890。");
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                if (_mihomoService.IsRunning)
+                {
+                    await _mihomoService.StopAsync();
+                }
+            }
+            catch
+            {
+                // 保留原始连接错误。
+            }
+
+            _homeView.ShowConnectionError(
+                "连接失败：" + ex.Message,
+                _selectedNode?.DisplayName);
+        }
+        finally
+        {
+            _connectionBusy = false;
+        }
+    }
+
     private async void NodesView_RefreshRequested(object? sender, EventArgs e)
     {
+        if (_mihomoService.IsRunning)
+        {
+            _nodesView.ShowStatus("请先断开连接，再刷新订阅。");
+            return;
+        }
+
         await RefreshSubscriptionAsync();
     }
 
-    private void NodesView_NodeSelectionRequested(object? sender, ProxyNode node)
+    private async void NodesView_NodeSelectionRequested(object? sender, ProxyNode node)
     {
-        _homeView.ShowConnectionState(connected: false, node.DisplayName);
-        _nodesView.ShowStatus($"已选择：{node.DisplayName}。接入 Mihomo 后才会正式切换线路。");
+        if (!_mihomoService.IsRunning)
+        {
+            _selectedNode = node;
+            _homeView.ShowConnectionState(connected: false, node.DisplayName);
+            _nodesView.ShowStatus($"已选择：{node.DisplayName}。点击首页连接后生效。");
+            return;
+        }
+
+        if (_connectionBusy)
+        {
+            return;
+        }
+
+        ProxyNode? previousNode = _selectedNode;
+        _connectionBusy = true;
+        _nodesView.SetBusy(true, $"正在切换到：{node.DisplayName}...");
+
+        try
+        {
+            await _mihomoService.SelectNodeAsync(node);
+            _selectedNode = node;
+            _homeView.ShowConnectionState(connected: true, node.DisplayName);
+            _nodesView.SetBusy(false, $"已切换到：{node.DisplayName}。");
+        }
+        catch (Exception ex)
+        {
+            _selectedNode = previousNode;
+            _homeView.ShowConnectionState(connected: true, previousNode?.DisplayName);
+            _nodesView.SetBusy(false, "切换失败：" + ex.Message);
+        }
+        finally
+        {
+            _connectionBusy = false;
+        }
     }
 
     private async Task<bool> RefreshSubscriptionAsync()
@@ -158,7 +275,20 @@ public partial class ShellWindow : Window
                 _appConfig,
                 _userSession);
 
+            _subscriptionYaml = result.Yaml;
             _nodesView.SetNodes(result.Nodes);
+
+            if (_selectedNode is null
+                || !result.Nodes.Any(node =>
+                    string.Equals(node.Name, _selectedNode.Name, StringComparison.Ordinal)))
+            {
+                _selectedNode = result.Nodes.FirstOrDefault();
+            }
+
+            _homeView.ShowConnectionState(
+                connected: false,
+                _selectedNode?.DisplayName);
+
             return true;
         }
         catch (Exception ex)
@@ -170,6 +300,23 @@ public partial class ShellWindow : Window
         {
             _subscriptionBusy = false;
         }
+    }
+
+    private void MihomoService_Exited(object? sender, MihomoExitedEventArgs e)
+    {
+        if (e.Expected)
+        {
+            return;
+        }
+
+        Dispatcher.Invoke(() =>
+        {
+            _connectionBusy = false;
+            _homeView.ShowConnectionError(
+                $"Mihomo 意外退出，退出代码：{e.ExitCode?.ToString() ?? "未知"}。",
+                _selectedNode?.DisplayName);
+            _nodesView.ShowStatus($"Mihomo 意外退出。日志：{_mihomoService.LogPath}");
+        });
     }
 
     private void NavigationButton_Click(object sender, RoutedEventArgs e)
@@ -207,6 +354,8 @@ public partial class ShellWindow : Window
 
     private void Window_Closed(object? sender, EventArgs e)
     {
+        _mihomoService.Exited -= MihomoService_Exited;
+        _mihomoService.Dispose();
         _v2BoardApi.Dispose();
         _configService.Dispose();
     }
