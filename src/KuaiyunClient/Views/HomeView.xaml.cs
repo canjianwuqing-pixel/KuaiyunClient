@@ -27,11 +27,28 @@ public partial class HomeView : UserControl
             : "--";
     }
 
+    public void SetConnectionBusy(bool busy, string message)
+    {
+        ConnectionButton.IsEnabled = !busy;
+        ConnectionStateText.Text = message;
+        ConnectionButton.Content = busy ? "处理中" : "连接";
+    }
+
     public void ShowConnectionState(bool connected, string? nodeName = null)
     {
+        ConnectionButton.IsEnabled = true;
         ConnectionStateText.Text = connected ? "已连接" : "未连接";
         CurrentNodeText.Text = $"当前节点：{(string.IsNullOrWhiteSpace(nodeName) ? "--" : nodeName)}";
         ConnectionButton.Content = connected ? "断开" : "连接";
+        ConnectionInfoText.Text = connected
+            ? "Mihomo 已运行。当前尚未开启 Windows 系统代理。"
+            : "当前阶段只启动 Mihomo，不会修改 Windows 系统代理。";
+    }
+
+    public void ShowConnectionError(string message, string? nodeName = null)
+    {
+        ShowConnectionState(connected: false, nodeName);
+        ConnectionInfoText.Text = message;
     }
 
     private void ConnectionButton_Click(object sender, RoutedEventArgs e)
