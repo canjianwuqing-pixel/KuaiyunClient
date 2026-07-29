@@ -20,6 +20,16 @@ public partial class LoginView : UserControl
         StatusText.Text = message ?? string.Empty;
     }
 
+    public void ClearPassword()
+    {
+        PasswordInput.Clear();
+    }
+
+    public void ShowStatus(string message)
+    {
+        StatusText.Text = message;
+    }
+
     private void LoginButton_Click(object sender, RoutedEventArgs e)
     {
         string email = EmailInput.Text.Trim();
