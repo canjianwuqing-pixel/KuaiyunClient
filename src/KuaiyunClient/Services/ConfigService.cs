@@ -234,6 +234,7 @@ public sealed class ConfigService : IConfigService, IDisposable
             or JsonException
             or FormatException
             or InvalidOperationException
+            or BuiltInProxyUnavailableException
             or IOException
             or UnauthorizedAccessException;
     }
