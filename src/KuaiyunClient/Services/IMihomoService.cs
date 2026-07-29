@@ -21,6 +21,12 @@ public interface IMihomoService
     Task<IReadOnlyList<ProxyNode>> GetNodesAsync(CancellationToken cancellationToken = default);
 
     Task SelectNodeAsync(ProxyNode node, CancellationToken cancellationToken = default);
+
+    Task<int?> TestDelayAsync(
+        ProxyNode node,
+        string testUrl,
+        int timeoutMilliseconds,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class MihomoLogEventArgs(string message, bool isError) : EventArgs
