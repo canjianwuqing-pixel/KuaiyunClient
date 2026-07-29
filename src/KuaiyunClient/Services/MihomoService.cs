@@ -92,18 +92,17 @@ public sealed class MihomoService : IMihomoService, IDisposable
             _stopping = false;
             _process = process;
 
-            if (!process.Start())
-            {
-                throw new MihomoStartException("Windows 未能启动 Mihomo 进程。");
-            }
-
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            _apiClient = new MihomoApiClient(runtime.ControllerPort, runtime.Secret);
-
             try
             {
+                if (!process.Start())
+                {
+                    throw new MihomoStartException("Windows 未能启动 Mihomo 进程。");
+                }
+
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+
+                _apiClient = new MihomoApiClient(runtime.ControllerPort, runtime.Secret);
                 await _apiClient.WaitUntilReadyAsync(
                     TimeSpan.FromSeconds(15),
                     cancellationToken);
@@ -201,7 +200,7 @@ public sealed class MihomoService : IMihomoService, IDisposable
             }
             catch (InvalidOperationException)
             {
-                // 进程已经退出。
+                // 进程已经退出或尚未成功启动。
             }
             finally
             {
