@@ -40,6 +40,12 @@ public partial class SettingsView : UserControl
 
     public void ShowSystemProxyStatus(bool enabled, string? message = null)
     {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(() => ShowSystemProxyStatus(enabled, message));
+            return;
+        }
+
         SystemProxyStatusText.Text = message
             ?? (enabled ? "系统代理：已启用" : "系统代理：未启用");
     }
