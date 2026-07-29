@@ -111,6 +111,13 @@ public sealed class MihomoApiClient : IDisposable
         return nodes;
     }
 
+    public async Task SelectNodeAsync(
+        ProxyNode node,
+        CancellationToken cancellationToken)
+    {
+        await SelectNodeAsync(node, preferredGroupName: null, cancellationToken);
+    }
+
     public async Task<NodeSelectionResult> SelectNodeAsync(
         ProxyNode node,
         string? preferredGroupName = null,
