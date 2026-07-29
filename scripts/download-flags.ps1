@@ -71,7 +71,11 @@ async function main() {
 
   for (const name of files) {
     const target = path.join(output, path.basename(name, ".svg").toLowerCase() + ".png");
-    await sharp(path.join(source, name), { density: 144 })
+    await sharp(path.join(source, name), {
+      density: 72,
+      limitInputPixels: false,
+      unlimited: true
+    })
       .resize({ width: 100, height: 75, fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } })
       .png({ compressionLevel: 9 })
       .toFile(target);
