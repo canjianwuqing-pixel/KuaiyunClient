@@ -1,5 +1,4 @@
 using KuaiyunClient.Models;
-using System.Net.Http;
 using System.Text.Json;
 
 namespace KuaiyunClient.Services;
@@ -16,6 +15,7 @@ public sealed class ConfigService : IConfigService, IDisposable
 
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
+    private readonly BuiltInProxyService _builtInProxyService = new();
     private readonly string _bootstrapPath;
     private readonly string _cachePath;
 
@@ -42,45 +42,76 @@ public sealed class ConfigService : IConfigService, IDisposable
     {
         BootstrapConfig bootstrap = await LoadBootstrapAsync(cancellationToken);
         List<string> errors = [];
+        AppConfig? cachedConfig = null;
 
-        if (IsCacheFresh(bootstrap.CloudUpdateHours))
+        if (File.Exists(_cachePath))
         {
             try
             {
-                AppConfig freshCache = await LoadCacheAsync(cancellationToken);
-                return new ConfigLoadResult(freshCache, _cachePath, FromCache: true);
+                cachedConfig = await LoadCacheAsync(cancellationToken);
             }
             catch (Exception ex) when (IsRecoverableConfigError(ex, cancellationToken))
             {
                 errors.Add($"本地缓存: {ex.Message}");
             }
+        }
+
+        if (cachedConfig is not null && IsCacheFresh(bootstrap.CloudUpdateHours))
+        {
+            return new ConfigLoadResult(
+                cachedConfig,
+                _cachePath,
+                FromCache: true);
         }
 
         foreach (string cloudUrl in bootstrap.CloudConfig)
         {
             try
             {
-                AppConfig config = await DownloadConfigAsync(cloudUrl, cancellationToken);
+                AppConfig config = await DownloadConfigAsync(
+                    _httpClient,
+                    cloudUrl,
+                    cancellationToken);
                 await SaveCacheAsync(config, cancellationToken);
                 return new ConfigLoadResult(config, cloudUrl, FromCache: false);
             }
             catch (Exception ex) when (IsRecoverableConfigError(ex, cancellationToken))
             {
-                errors.Add($"{cloudUrl}: {ex.Message}");
+                errors.Add($"{cloudUrl}（直连）: {ex.Message}");
             }
         }
 
-        if (File.Exists(_cachePath))
+        if (cachedConfig?.BuiltInProxy.Count > 0)
         {
-            try
+            foreach (string cloudUrl in bootstrap.CloudConfig)
             {
-                AppConfig staleCache = await LoadCacheAsync(cancellationToken);
-                return new ConfigLoadResult(staleCache, _cachePath, FromCache: true);
+                try
+                {
+                    AppConfig config = await _builtInProxyService.ExecuteAsync(
+                        cachedConfig.BuiltInProxy,
+                        (client, token) => DownloadConfigAsync(client, cloudUrl, token),
+                        cancellationToken: cancellationToken);
+
+                    await SaveCacheAsync(config, cancellationToken);
+                    return new ConfigLoadResult(
+                        config,
+                        cloudUrl,
+                        FromCache: false,
+                        UsedBuiltInProxy: true);
+                }
+                catch (Exception ex) when (IsRecoverableConfigError(ex, cancellationToken))
+                {
+                    errors.Add($"{cloudUrl}（应急代理）: {ex.Message}");
+                }
             }
-            catch (Exception ex) when (IsRecoverableConfigError(ex, cancellationToken))
-            {
-                errors.Add($"本地缓存: {ex.Message}");
-            }
+        }
+
+        if (cachedConfig is not null)
+        {
+            return new ConfigLoadResult(
+                cachedConfig,
+                _cachePath,
+                FromCache: true);
         }
 
         string details = errors.Count == 0
@@ -88,7 +119,9 @@ public sealed class ConfigService : IConfigService, IDisposable
             : string.Join(Environment.NewLine, errors);
 
         throw new InvalidOperationException(
-            "远程配置读取失败，并且本地没有可用缓存。" + Environment.NewLine + details);
+            "远程配置读取失败，并且本地没有可用缓存。"
+            + Environment.NewLine
+            + details);
     }
 
     private async Task<BootstrapConfig> LoadBootstrapAsync(CancellationToken cancellationToken)
@@ -122,7 +155,8 @@ public sealed class ConfigService : IConfigService, IDisposable
         return bootstrap;
     }
 
-    private async Task<AppConfig> DownloadConfigAsync(
+    private static async Task<AppConfig> DownloadConfigAsync(
+        HttpClient client,
         string cloudUrl,
         CancellationToken cancellationToken)
     {
@@ -130,7 +164,7 @@ public sealed class ConfigService : IConfigService, IDisposable
         request.Headers.TryAddWithoutValidation("Accept", "application/json");
         request.Headers.TryAddWithoutValidation("Cache-Control", "no-cache");
 
-        using HttpResponseMessage response = await _httpClient.SendAsync(
+        using HttpResponseMessage response = await client.SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
@@ -198,6 +232,7 @@ public sealed class ConfigService : IConfigService, IDisposable
         return exception is HttpRequestException
             or TaskCanceledException
             or JsonException
+            or FormatException
             or InvalidOperationException
             or IOException
             or UnauthorizedAccessException;
@@ -223,7 +258,10 @@ public sealed class ConfigService : IConfigService, IDisposable
         config.AppName = config.AppName.Trim();
         config.UserAgent = config.UserAgent.Trim();
         config.RemoteHosts = NormalizeHttpUrls(config.RemoteHosts, "RemoteHosts");
-        config.BuiltInProxy ??= [];
+        config.BuiltInProxy = BuiltInProxyParser
+            .ParseMany(config.BuiltInProxy)
+            .Select(endpoint => endpoint.NormalizedValue)
+            .ToList();
 
         if (config.RemoteHosts.Count == 0)
         {
@@ -287,6 +325,7 @@ public sealed class ConfigService : IConfigService, IDisposable
 
     public void Dispose()
     {
+        _builtInProxyService.Dispose();
         if (_ownsHttpClient)
         {
             _httpClient.Dispose();
