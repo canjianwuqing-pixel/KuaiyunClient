@@ -9,7 +9,6 @@ public sealed class MihomoApiClient : IDisposable
 {
     private static readonly string[] PreferredGroupNames =
     [
-        "GLOBAL",
         "节点选择",
         "代理选择",
         "选择代理",
@@ -27,7 +26,6 @@ public sealed class MihomoApiClient : IDisposable
             BaseAddress = new Uri($"http://127.0.0.1:{controllerPort}/"),
             Timeout = TimeSpan.FromSeconds(20)
         };
-
         _httpClient.DefaultRequestHeaders.TryAddWithoutValidation(
             "Authorization",
             $"Bearer {secret}");
@@ -87,7 +85,9 @@ public sealed class MihomoApiClient : IDisposable
             }
 
             string type = ReadString(property.Value, "type") ?? string.Empty;
-            if (IsGroupType(type) || IsBuiltInProxy(property.Name))
+            if (IsGroupType(type)
+                || IsBuiltInProxy(property.Name)
+                || SubscriptionNodeFilter.ShouldHide(property.Name))
             {
                 continue;
             }
@@ -98,9 +98,7 @@ public sealed class MihomoApiClient : IDisposable
             nodes.Add(new ProxyNode
             {
                 Name = property.Name,
-                DisplayName = property.Name.StartsWith(location.Flag, StringComparison.Ordinal)
-                    ? property.Name
-                    : $"{location.Flag} {property.Name}",
+                DisplayName = NodeDisplayNameFormatter.Format(property.Name, location),
                 GroupName = location.CountryName,
                 Type = type.ToUpperInvariant(),
                 CountryCode = location.CountryCode,
@@ -113,8 +111,9 @@ public sealed class MihomoApiClient : IDisposable
         return nodes;
     }
 
-    public async Task SelectNodeAsync(
+    public async Task<NodeSelectionResult> SelectNodeAsync(
         ProxyNode node,
+        string? preferredGroupName = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(node);
@@ -122,11 +121,11 @@ public sealed class MihomoApiClient : IDisposable
         using JsonDocument json = await GetProxiesDocumentAsync(cancellationToken);
         JsonElement proxies = json.RootElement.GetProperty("proxies");
 
-        string? groupName = FindSelectorGroup(proxies, node.Name);
+        string? groupName = FindSelectorGroup(proxies, node.Name, preferredGroupName);
         if (string.IsNullOrWhiteSpace(groupName))
         {
             throw new MihomoApiException(
-                $"订阅中没有找到可切换到“{node.Name}”的 selector 节点组。");
+                $"没有找到可以使用“{node.DisplayName}”的线路组。");
         }
 
         string path = "proxies/" + Uri.EscapeDataString(groupName);
@@ -139,8 +138,24 @@ public sealed class MihomoApiClient : IDisposable
         {
             string body = await response.Content.ReadAsStringAsync(cancellationToken);
             throw new MihomoApiException(
-                $"切换节点失败（HTTP {(int)response.StatusCode}）：{body}");
+                $"线路切换失败（HTTP {(int)response.StatusCode}）：{body}");
         }
+
+        string? actualNode = null;
+        for (int attempt = 0; attempt < 10; attempt++)
+        {
+            actualNode = await ReadSelectedNodeAsync(groupName, cancellationToken);
+            if (string.Equals(actualNode, node.Name, StringComparison.Ordinal))
+            {
+                return new NodeSelectionResult(groupName, actualNode);
+            }
+
+            await Task.Delay(100, cancellationToken);
+        }
+
+        throw new MihomoApiException(
+            $"线路未真正切换成功。目标：{node.DisplayName}；"
+            + $"当前：{(string.IsNullOrWhiteSpace(actualNode) ? "未知" : actualNode)}。");
     }
 
     public async Task<int?> TestDelayAsync(
@@ -198,6 +213,24 @@ public sealed class MihomoApiClient : IDisposable
         return null;
     }
 
+    private async Task<string?> ReadSelectedNodeAsync(
+        string groupName,
+        CancellationToken cancellationToken)
+    {
+        string path = "proxies/" + Uri.EscapeDataString(groupName);
+        using HttpResponseMessage response = await _httpClient.GetAsync(path, cancellationToken);
+        string body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new MihomoApiException(
+                $"无法确认实际线路（HTTP {(int)response.StatusCode}）。");
+        }
+
+        using JsonDocument json = JsonDocument.Parse(body);
+        return ReadString(json.RootElement, "now");
+    }
+
     private async Task<JsonDocument> GetProxiesDocumentAsync(
         CancellationToken cancellationToken)
     {
@@ -209,7 +242,7 @@ public sealed class MihomoApiClient : IDisposable
         if (!response.IsSuccessStatusCode)
         {
             throw new MihomoApiException(
-                $"读取 Mihomo 节点失败（HTTP {(int)response.StatusCode}）：{body}");
+                $"读取节点失败（HTTP {(int)response.StatusCode}）：{body}");
         }
 
         JsonDocument json = JsonDocument.Parse(body);
@@ -217,13 +250,16 @@ public sealed class MihomoApiClient : IDisposable
             || proxies.ValueKind != JsonValueKind.Object)
         {
             json.Dispose();
-            throw new MihomoApiException("Mihomo Controller 返回的数据缺少 proxies。");
+            throw new MihomoApiException("Controller 返回的数据缺少 proxies。");
         }
 
         return json;
     }
 
-    private static string? FindSelectorGroup(JsonElement proxies, string nodeName)
+    private static string? FindSelectorGroup(
+        JsonElement proxies,
+        string nodeName,
+        string? preferredGroupName)
     {
         List<string> candidates = [];
 
@@ -243,13 +279,24 @@ public sealed class MihomoApiClient : IDisposable
         }
 
         return candidates
-            .OrderBy(GetGroupPriority)
+            .OrderBy(name => GetGroupPriority(name, preferredGroupName))
             .ThenBy(name => name, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
     }
 
-    private static int GetGroupPriority(string groupName)
+    private static int GetGroupPriority(string groupName, string? preferredGroupName)
     {
+        if (!string.IsNullOrWhiteSpace(preferredGroupName)
+            && string.Equals(groupName, preferredGroupName, StringComparison.OrdinalIgnoreCase))
+        {
+            return -100;
+        }
+
+        if (string.Equals(groupName, "GLOBAL", StringComparison.OrdinalIgnoreCase))
+        {
+            return 10_000;
+        }
+
         for (int index = 0; index < PreferredGroupNames.Length; index++)
         {
             if (string.Equals(
@@ -261,7 +308,7 @@ public sealed class MihomoApiClient : IDisposable
             }
         }
 
-        return PreferredGroupNames.Length;
+        return PreferredGroupNames.Length + 10;
     }
 
     private static bool ContainsNode(JsonElement group, string nodeName)
@@ -329,6 +376,8 @@ public sealed class MihomoApiClient : IDisposable
         _httpClient.Dispose();
     }
 }
+
+public sealed record NodeSelectionResult(string GroupName, string NodeName);
 
 public sealed class MihomoApiException : Exception
 {
