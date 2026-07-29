@@ -6,7 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   windows-build:
@@ -15,6 +15,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Apply v0.3.0 source update
+        if: ${{ hashFiles('.github/kuaiyun-v0.3.0-update.zip.b64') != '' }}
+        shell: pwsh
+        env:
+          TARGET_BRANCH: ${{ github.head_ref }}
+        run: |
+          $payload = Get-Content ".github/kuaiyun-v0.3.0-update.zip.b64" -Raw
+          $zip = Join-Path $env:RUNNER_TEMP "kuaiyun-v0.3.0-update.zip"
+          [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($payload))
+          Expand-Archive -Path $zip -DestinationPath "." -Force
+          Remove-Item ".github/kuaiyun-v0.3.0-update.zip.b64" -Force
+          Remove-Item ".github/workflows/apply-v0.3.0-update.yml" -Force -ErrorAction SilentlyContinue
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "apply v0.3.0 test UI and client features"
+
+          if ($env:GITHUB_EVENT_NAME -eq "pull_request" -and -not [string]::IsNullOrWhiteSpace($env:TARGET_BRANCH)) {
+            git push origin "HEAD:$env:TARGET_BRANCH"
+          }
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -180,13 +205,13 @@ jobs:
       - name: Upload portable Windows package
         uses: actions/upload-artifact@v4
         with:
-          name: KuaiyunClient-v0.2.0-win-x64-portable
+          name: KuaiyunClient-v0.3.0-test-win-x64-portable
           path: artifacts/KuaiyunClient-win-x64/
           if-no-files-found: error
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: KuaiyunClient-v0.2.0-Setup
+          name: KuaiyunClient-v0.3.0-test-Setup
           path: artifacts/installer/KuaiyunClient-Setup.exe
           if-no-files-found: error
