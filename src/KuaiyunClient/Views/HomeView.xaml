@@ -61,9 +61,11 @@
                             Margin="0,26,0,0" Click="ConnectionButton_Click" />
                 </StackPanel>
 
-                <TextBlock Grid.Row="1" Text="连接功能将在 Mihomo 服务接入后启用。"
+                <TextBlock Grid.Row="1" x:Name="ConnectionInfoText"
+                           Text="当前阶段只启动 Mihomo，不会修改 Windows 系统代理。"
                            Foreground="{StaticResource MutedTextBrush}"
-                           HorizontalAlignment="Center" />
+                           HorizontalAlignment="Center"
+                           TextAlignment="Center" TextWrapping="Wrap" />
             </Grid>
         </Border>
     </Grid>
