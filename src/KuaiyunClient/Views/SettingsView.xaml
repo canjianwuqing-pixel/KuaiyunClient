@@ -19,9 +19,16 @@
                               Content="启动后自动连接" Margin="0,0,0,14"
                               Checked="OptionChanged" Unchecked="OptionChanged" />
                     <CheckBox x:Name="SystemProxyCheckBox"
-                              Content="使用 Windows 系统代理"
+                              Content="连接时使用 Windows 系统代理（推荐）"
                               IsChecked="True"
                               Checked="OptionChanged" Unchecked="OptionChanged" />
+                    <TextBlock Text="开启后，浏览器和使用系统代理的软件会自动经过快云；断开和退出时恢复原设置。"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="11" TextWrapping="Wrap" Margin="24,8,0,0" />
+                    <TextBlock x:Name="SystemProxyStatusText"
+                               Text="系统代理：未启用"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="11" TextWrapping="Wrap" Margin="24,7,0,0" />
                 </StackPanel>
             </Border>
 
