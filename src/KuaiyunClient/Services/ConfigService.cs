@@ -41,14 +41,20 @@ public sealed class ConfigService : IConfigService, IDisposable
     public async Task<ConfigLoadResult> LoadAsync(CancellationToken cancellationToken = default)
     {
         BootstrapConfig bootstrap = await LoadBootstrapAsync(cancellationToken);
+        List<string> errors = [];
 
         if (IsCacheFresh(bootstrap.CloudUpdateHours))
         {
-            AppConfig freshCache = await LoadCacheAsync(cancellationToken);
-            return new ConfigLoadResult(freshCache, _cachePath, FromCache: true);
+            try
+            {
+                AppConfig freshCache = await LoadCacheAsync(cancellationToken);
+                return new ConfigLoadResult(freshCache, _cachePath, FromCache: true);
+            }
+            catch (Exception ex) when (IsRecoverableConfigError(ex, cancellationToken))
+            {
+                errors.Add($"本地缓存: {ex.Message}");
+            }
         }
-
-        List<string> errors = [];
 
         foreach (string cloudUrl in bootstrap.CloudConfig)
         {
@@ -58,10 +64,7 @@ public sealed class ConfigService : IConfigService, IDisposable
                 await SaveCacheAsync(config, cancellationToken);
                 return new ConfigLoadResult(config, cloudUrl, FromCache: false);
             }
-            catch (Exception ex) when (ex is HttpRequestException
-                                       or TaskCanceledException
-                                       or JsonException
-                                       or InvalidOperationException)
+            catch (Exception ex) when (IsRecoverableConfigError(ex, cancellationToken))
             {
                 errors.Add($"{cloudUrl}: {ex.Message}");
             }
@@ -69,8 +72,15 @@ public sealed class ConfigService : IConfigService, IDisposable
 
         if (File.Exists(_cachePath))
         {
-            AppConfig staleCache = await LoadCacheAsync(cancellationToken);
-            return new ConfigLoadResult(staleCache, _cachePath, FromCache: true);
+            try
+            {
+                AppConfig staleCache = await LoadCacheAsync(cancellationToken);
+                return new ConfigLoadResult(staleCache, _cachePath, FromCache: true);
+            }
+            catch (Exception ex) when (IsRecoverableConfigError(ex, cancellationToken))
+            {
+                errors.Add($"本地缓存: {ex.Message}");
+            }
         }
 
         string details = errors.Count == 0
@@ -174,6 +184,23 @@ public sealed class ConfigService : IConfigService, IDisposable
 
         DateTime lastWriteTimeUtc = File.GetLastWriteTimeUtc(_cachePath);
         return DateTime.UtcNow - lastWriteTimeUtc < TimeSpan.FromHours(updateHours);
+    }
+
+    private static bool IsRecoverableConfigError(
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        if (exception is OperationCanceledException && cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        return exception is HttpRequestException
+            or TaskCanceledException
+            or JsonException
+            or InvalidOperationException
+            or IOException
+            or UnauthorizedAccessException;
     }
 
     private static AppConfig ValidateConfig(AppConfig? config)
