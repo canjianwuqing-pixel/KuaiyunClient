@@ -1,7 +1,142 @@
+using System.Text;
 using System.Windows;
+using System.Windows.Threading;
 
 namespace KuaiyunClient;
 
 public partial class App : Application
 {
+    private static readonly object LogGate = new();
+
+    public static string StartupLogPath { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "KuaiyunClient",
+        "logs",
+        "startup.log");
+
+    public App()
+    {
+        AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+        TaskScheduler.UnobservedTaskException += TaskScheduler_UnobservedTaskException;
+        WriteLog("客户端进程已启动。", null);
+    }
+
+    private void Application_Startup(object sender, StartupEventArgs e)
+    {
+        try
+        {
+            WriteLog(
+                $"正在创建主窗口。版本：{typeof(App).Assembly.GetName().Version}；目录：{AppContext.BaseDirectory}",
+                null);
+
+            ShellWindow window = new();
+            MainWindow = window;
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+            window.Show();
+
+            WriteLog("主窗口已显示。", null);
+        }
+        catch (Exception ex)
+        {
+            ShowFatalError("快云客户端启动失败", ex);
+            Shutdown(-1);
+        }
+    }
+
+    private void Application_DispatcherUnhandledException(
+        object sender,
+        DispatcherUnhandledExceptionEventArgs e)
+    {
+        e.Handled = true;
+        ShowFatalError("快云客户端发生未处理错误", e.Exception);
+        Shutdown(-1);
+    }
+
+    private static void CurrentDomain_UnhandledException(
+        object sender,
+        UnhandledExceptionEventArgs e)
+    {
+        Exception exception = e.ExceptionObject as Exception
+            ?? new Exception(e.ExceptionObject?.ToString() ?? "未知未处理错误");
+
+        WriteLog(
+            e.IsTerminating ? "进程即将因未处理错误退出。" : "捕获到未处理错误。",
+            exception);
+    }
+
+    private static void TaskScheduler_UnobservedTaskException(
+        object? sender,
+        UnobservedTaskExceptionEventArgs e)
+    {
+        WriteLog("捕获到未观察的异步任务错误。", e.Exception);
+        e.SetObserved();
+    }
+
+    private void Application_Exit(object sender, ExitEventArgs e)
+    {
+        WriteLog($"客户端进程退出，代码：{e.ApplicationExitCode}。", null);
+    }
+
+    private static void ShowFatalError(string title, Exception exception)
+    {
+        WriteLog(title, exception);
+
+        string message = title
+            + Environment.NewLine
+            + Environment.NewLine
+            + exception.Message
+            + Environment.NewLine
+            + Environment.NewLine
+            + "错误日志："
+            + Environment.NewLine
+            + StartupLogPath;
+
+        try
+        {
+            MessageBox.Show(
+                message,
+                "快云加速",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        catch
+        {
+            // 如果连错误窗口都无法创建，日志仍然会保留。
+        }
+    }
+
+    private static void WriteLog(string message, Exception? exception)
+    {
+        try
+        {
+            lock (LogGate)
+            {
+                string? directory = Path.GetDirectoryName(StartupLogPath);
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                StringBuilder output = new();
+                output.Append('[')
+                    .Append(DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss.fff zzz"))
+                    .Append("] ")
+                    .AppendLine(message);
+
+                if (exception is not null)
+                {
+                    output.AppendLine(exception.ToString());
+                }
+
+                File.AppendAllText(
+                    StartupLogPath,
+                    output.ToString(),
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            }
+        }
+        catch
+        {
+            // 启动日志不能反过来阻止客户端启动。
+        }
+    }
 }
