@@ -1,6 +1,7 @@
 using KuaiyunClient.Models;
 using KuaiyunClient.Services;
 using KuaiyunClient.Views;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -12,6 +13,7 @@ public partial class ShellWindow : Window
     private const string DelayTestUrl = "https://www.gstatic.com/generate_204";
     private const int DelayTestTimeoutMilliseconds = 5000;
     private const int DelayTestConcurrency = 6;
+    private const string SystemProxyAddress = "127.0.0.1:7890";
 
     private readonly LoginView _loginView = new();
     private readonly HomeView _homeView = new();
@@ -21,15 +23,21 @@ public partial class ShellWindow : Window
     private readonly V2BoardApi _v2BoardApi = new();
     private readonly SubscriptionService _subscriptionService = new();
     private readonly MihomoService _mihomoService = new();
+    private readonly SystemProxyService _systemProxyService = new();
+    private readonly ClientSettingsService _clientSettingsService = new();
 
     private AppConfig? _appConfig;
     private UserSession? _userSession;
     private string? _subscriptionYaml;
     private ProxyNode? _selectedNode;
+    private ClientSettings _clientSettings = ClientSettings.Default;
     private bool _loginBusy;
     private bool _subscriptionBusy;
     private bool _connectionBusy;
     private bool _delayTestBusy;
+    private bool _closing;
+    private bool _closeCompleted;
+    private bool _resourcesDisposed;
 
     private static readonly Brush ActiveBrush = new SolidColorBrush(Color.FromRgb(32, 58, 87));
     private static readonly Brush InactiveBrush = Brushes.Transparent;
@@ -45,6 +53,7 @@ public partial class ShellWindow : Window
         _nodesView.RefreshRequested += NodesView_RefreshRequested;
         _nodesView.DelayTestRequested += NodesView_DelayTestRequested;
         _nodesView.NodeSelectionRequested += NodesView_NodeSelectionRequested;
+        _settingsView.OptionsChanged += SettingsView_OptionsChanged;
         _mihomoService.Exited += MihomoService_Exited;
 
         HomeNavButton.IsEnabled = false;
@@ -55,8 +64,35 @@ public partial class ShellWindow : Window
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        ConfigStatusText.Text = "正在读取...";
+        bool hadPendingProxyBackup = _systemProxyService.HasPendingBackup;
+        ConfigStatusText.Text = hadPendingProxyBackup ? "正在恢复网络..." : "正在读取...";
 
+        try
+        {
+            await _systemProxyService.RestoreAsync();
+            _settingsView.ShowSystemProxyStatus(
+                enabled: false,
+                hadPendingProxyBackup
+                    ? "系统代理：已恢复上次退出前的设置"
+                    : "系统代理：未启用");
+        }
+        catch (Exception ex)
+        {
+            _settingsView.ShowSystemProxyStatus(
+                enabled: _systemProxyService.IsEnabled,
+                "系统代理恢复失败，请连接后重试或手动检查 Windows 代理设置。");
+
+            MessageBox.Show(
+                ex.Message,
+                "系统代理恢复失败",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+
+        _clientSettings = await _clientSettingsService.LoadAsync();
+        _settingsView.SetOptions(ToClientOptions(_clientSettings));
+
+        ConfigStatusText.Text = "正在读取...";
         try
         {
             ConfigLoadResult result = await _configService.LoadAsync();
@@ -155,10 +191,7 @@ public partial class ShellWindow : Window
         {
             if (_mihomoService.IsRunning)
             {
-                _homeView.SetConnectionBusy(true, "正在断开...");
-                await _mihomoService.StopAsync();
-                _homeView.ShowConnectionState(connected: false, _selectedNode?.DisplayName);
-                _nodesView.ShowStatus("Mihomo 已停止。Windows 系统代理未被修改。");
+                await DisconnectAsync();
                 return;
             }
 
@@ -187,31 +220,144 @@ public partial class ShellWindow : Window
             _homeView.SetConnectionBusy(true, "正在切换节点...");
             await _mihomoService.SelectNodeAsync(_selectedNode);
 
+            if (_clientSettings.UseSystemProxy)
+            {
+                _homeView.SetConnectionBusy(true, "正在启用 Windows 系统代理...");
+                await _systemProxyService.EnableAsync(SystemProxyAddress);
+                _settingsView.ShowSystemProxyStatus(
+                    enabled: true,
+                    $"系统代理：已启用 {SystemProxyAddress}");
+            }
+            else
+            {
+                _settingsView.ShowSystemProxyStatus(
+                    enabled: false,
+                    "系统代理：设置中已关闭，仅运行本地代理");
+            }
+
             _homeView.ShowConnectionState(connected: true, _selectedNode.DisplayName);
             _nodesView.ShowStatus(
-                $"已连接：{_selectedNode.DisplayName}。当前仅启动本地代理 127.0.0.1:7890。");
+                _clientSettings.UseSystemProxy
+                    ? $"已连接：{_selectedNode.DisplayName}。Windows 系统代理已启用。"
+                    : $"已连接：{_selectedNode.DisplayName}。当前仅启动本地代理 {SystemProxyAddress}。");
         }
         catch (Exception ex)
         {
-            try
+            string? rollbackError = await RollbackConnectionAsync();
+            string message = "连接失败：" + ex.Message;
+            if (!string.IsNullOrWhiteSpace(rollbackError))
             {
-                if (_mihomoService.IsRunning)
-                {
-                    await _mihomoService.StopAsync();
-                }
-            }
-            catch
-            {
-                // 保留原始连接错误。
+                message += Environment.NewLine + rollbackError;
             }
 
-            _homeView.ShowConnectionError(
-                "连接失败：" + ex.Message,
-                _selectedNode?.DisplayName);
+            _homeView.ShowConnectionError(message, _selectedNode?.DisplayName);
         }
         finally
         {
             _connectionBusy = false;
+        }
+    }
+
+    private async Task DisconnectAsync()
+    {
+        _homeView.SetConnectionBusy(true, "正在恢复 Windows 系统代理...");
+
+        try
+        {
+            await _systemProxyService.RestoreAsync();
+            _settingsView.ShowSystemProxyStatus(enabled: false, "系统代理：已恢复原设置");
+        }
+        catch (Exception ex)
+        {
+            _homeView.ShowConnectionError(
+                "无法安全断开：系统代理恢复失败。Mihomo 将继续运行，避免网络中断。"
+                + Environment.NewLine
+                + ex.Message,
+                _selectedNode?.DisplayName);
+            _settingsView.ShowSystemProxyStatus(
+                enabled: _systemProxyService.IsEnabled,
+                "系统代理：恢复失败，Mihomo 仍在运行");
+            return;
+        }
+
+        _homeView.SetConnectionBusy(true, "正在断开...");
+        await _mihomoService.StopAsync();
+        _homeView.ShowConnectionState(connected: false, _selectedNode?.DisplayName);
+        _nodesView.ShowStatus("已断开，Windows 系统代理已恢复原设置。");
+    }
+
+    private async Task<string?> RollbackConnectionAsync()
+    {
+        try
+        {
+            await _systemProxyService.RestoreAsync();
+            _settingsView.ShowSystemProxyStatus(enabled: false, "系统代理：已恢复原设置");
+        }
+        catch (Exception ex)
+        {
+            _settingsView.ShowSystemProxyStatus(
+                enabled: _systemProxyService.IsEnabled,
+                "系统代理：恢复失败，Mihomo 未停止");
+            return "系统代理恢复失败，为避免断网，Mihomo 仍保持运行：" + ex.Message;
+        }
+
+        try
+        {
+            if (_mihomoService.IsRunning)
+            {
+                await _mihomoService.StopAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            return "Mihomo 停止失败：" + ex.Message;
+        }
+
+        return null;
+    }
+
+    private async void SettingsView_OptionsChanged(object? sender, ClientOptions options)
+    {
+        ClientSettings previous = _clientSettings;
+        ClientSettings requested = new(
+            options.StartWithWindows,
+            options.AutoConnect,
+            options.UseSystemProxy);
+
+        try
+        {
+            if (_mihomoService.IsRunning
+                && previous.UseSystemProxy != requested.UseSystemProxy)
+            {
+                if (requested.UseSystemProxy)
+                {
+                    await _systemProxyService.EnableAsync(SystemProxyAddress);
+                    _settingsView.ShowSystemProxyStatus(
+                        enabled: true,
+                        $"系统代理：已启用 {SystemProxyAddress}");
+                    _nodesView.ShowStatus("Windows 系统代理已启用，当前连接无需重新启动。");
+                }
+                else
+                {
+                    await _systemProxyService.RestoreAsync();
+                    _settingsView.ShowSystemProxyStatus(
+                        enabled: false,
+                        "系统代理：已关闭并恢复原设置");
+                    _nodesView.ShowStatus(
+                        $"Windows 系统代理已关闭，Mihomo 仍在 {SystemProxyAddress} 运行。");
+                }
+            }
+
+            await _clientSettingsService.SaveAsync(requested);
+            _clientSettings = requested;
+        }
+        catch (Exception ex)
+        {
+            _clientSettings = previous;
+            _settingsView.SetOptions(ToClientOptions(previous));
+            _settingsView.ShowSystemProxyStatus(
+                enabled: _systemProxyService.IsEnabled,
+                "系统代理设置修改失败：" + ex.Message);
         }
     }
 
@@ -430,18 +576,31 @@ public partial class ShellWindow : Window
         }
     }
 
-    private void MihomoService_Exited(object? sender, MihomoExitedEventArgs e)
+    private async void MihomoService_Exited(object? sender, MihomoExitedEventArgs e)
     {
         if (e.Expected)
         {
             return;
         }
 
-        Dispatcher.Invoke(() =>
+        string recoveryMessage = "Windows 系统代理已恢复原设置。";
+        try
+        {
+            await _systemProxyService.RestoreAsync();
+            _settingsView.ShowSystemProxyStatus(enabled: false, "系统代理：已恢复原设置");
+        }
+        catch (Exception ex)
+        {
+            recoveryMessage = "系统代理恢复失败：" + ex.Message;
+        }
+
+        await Dispatcher.InvokeAsync(() =>
         {
             _connectionBusy = false;
             _homeView.ShowConnectionError(
-                $"Mihomo 意外退出，退出代码：{e.ExitCode?.ToString() ?? "未知"}。",
+                $"Mihomo 意外退出，退出代码：{e.ExitCode?.ToString() ?? "未知"}。"
+                + Environment.NewLine
+                + recoveryMessage,
                 _selectedNode?.DisplayName);
             _nodesView.ShowStatus($"Mihomo 意外退出。日志：{_mihomoService.LogPath}");
         });
@@ -480,11 +639,70 @@ public partial class ShellWindow : Window
         }
     }
 
-    private void Window_Closed(object? sender, EventArgs e)
+    private async void Window_Closing(object? sender, CancelEventArgs e)
     {
+        if (_closeCompleted)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        if (_closing)
+        {
+            return;
+        }
+
+        _closing = true;
+        IsEnabled = false;
+
+        try
+        {
+            await _systemProxyService.RestoreAsync();
+            if (_mihomoService.IsRunning)
+            {
+                await _mihomoService.StopAsync();
+            }
+
+            DisposeResources();
+            _closeCompleted = true;
+            Close();
+        }
+        catch (Exception ex)
+        {
+            _closing = false;
+            IsEnabled = true;
+            MessageBox.Show(
+                "为了避免 Windows 系统代理指向已停止的本地端口，客户端暂未退出。"
+                + Environment.NewLine
+                + Environment.NewLine
+                + ex.Message,
+                "退出前恢复网络失败",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private void DisposeResources()
+    {
+        if (_resourcesDisposed)
+        {
+            return;
+        }
+
+        _resourcesDisposed = true;
         _mihomoService.Exited -= MihomoService_Exited;
+        _settingsView.OptionsChanged -= SettingsView_OptionsChanged;
         _mihomoService.Dispose();
+        _systemProxyService.Dispose();
         _v2BoardApi.Dispose();
         _configService.Dispose();
+    }
+
+    private static ClientOptions ToClientOptions(ClientSettings settings)
+    {
+        return new ClientOptions(
+            settings.StartWithWindows,
+            settings.AutoConnect,
+            settings.UseSystemProxy);
     }
 }
