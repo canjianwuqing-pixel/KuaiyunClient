@@ -5,18 +5,20 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <StackPanel>
             <TextBlock Text="节点" FontSize="28" FontWeight="Bold" />
-            <TextBlock Text="订阅加载完成后在这里选择线路"
+            <TextBlock Text="从账号订阅中读取真实线路，旗帜根据节点名称自动识别"
                        Foreground="{StaticResource MutedTextBrush}"
                        Margin="0,6,0,0" />
         </StackPanel>
 
-        <Grid Grid.Row="1" Margin="0,22,0,14">
-            <Button Content="刷新节点" Width="110" HorizontalAlignment="Left"
+        <Grid Grid.Row="1" Margin="0,22,0,10">
+            <Button x:Name="RefreshButton" Content="刷新订阅" Width="116"
+                    HorizontalAlignment="Left"
                     Style="{StaticResource PrimaryButtonStyle}"
                     Click="RefreshButton_Click" />
             <TextBlock x:Name="SummaryText" Text="0 个节点"
@@ -24,34 +26,77 @@
                        HorizontalAlignment="Right" VerticalAlignment="Center" />
         </Grid>
 
-        <Border Grid.Row="2" Style="{StaticResource CardStyle}">
+        <TextBlock Grid.Row="2" x:Name="StatusText"
+                   Text="登录后自动下载订阅。"
+                   Foreground="{StaticResource MutedTextBrush}"
+                   TextWrapping="Wrap" Margin="0,0,0,12" />
+
+        <Border Grid.Row="3" Style="{StaticResource CardStyle}" Padding="12">
             <Grid>
                 <TextBlock x:Name="EmptyText"
                            Text="尚未加载节点。登录并获取订阅后再显示真实节点。"
                            Foreground="{StaticResource MutedTextBrush}"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           TextAlignment="Center" TextWrapping="Wrap" />
 
                 <ListBox x:Name="NodesList" Visibility="Collapsed"
                          BorderThickness="0" Background="Transparent"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                          SelectionChanged="NodesList_SelectionChanged">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="Margin" Value="0,0,0,10" />
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="BorderThickness" Value="0" />
+                        </Style>
+                    </ListBox.ItemContainerStyle>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Grid Margin="4,8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="120" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                    <TextBlock Text="{Binding Type}"
-                                               Foreground="{StaticResource MutedTextBrush}"
-                                               FontSize="11" Margin="0,4,0,0" />
-                                </StackPanel>
-                                <TextBlock Grid.Column="1"
-                                           Text="{Binding DelayMilliseconds, StringFormat={}{0} ms}"
-                                           HorizontalAlignment="Right" VerticalAlignment="Center"
-                                           Foreground="{StaticResource MutedTextBrush}" />
-                            </Grid>
+                            <Border Padding="14" CornerRadius="11"
+                                    BorderBrush="{StaticResource LineBrush}"
+                                    BorderThickness="1" Background="#FAFCFF">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="52" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="120" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock Text="{Binding CountryFlag}"
+                                               FontFamily="Segoe UI Emoji"
+                                               FontSize="28"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+
+                                    <StackPanel Grid.Column="1" Margin="10,0,12,0">
+                                        <TextBlock Text="{Binding DisplayName}"
+                                                   FontWeight="SemiBold" FontSize="14"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                                            <TextBlock Text="{Binding CountryName}"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       FontSize="11" />
+                                            <TextBlock Text="  ·  "
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       FontSize="11" />
+                                            <TextBlock Text="{Binding Type}"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       FontSize="11" />
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding Server}"
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   FontSize="10" Margin="0,4,0,0"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+
+                                    <TextBlock Grid.Column="2"
+                                               Text="{Binding DelayText}"
+                                               HorizontalAlignment="Right"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource MutedTextBrush}" />
+                                </Grid>
+                            </Border>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
