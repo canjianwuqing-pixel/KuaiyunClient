@@ -7,4 +7,8 @@ public interface IConfigService
     Task<ConfigLoadResult> LoadAsync(CancellationToken cancellationToken = default);
 }
 
-public sealed record ConfigLoadResult(AppConfig Config, string Source, bool FromCache);
+public sealed record ConfigLoadResult(
+    AppConfig Config,
+    string Source,
+    bool FromCache,
+    bool UsedBuiltInProxy = false);
