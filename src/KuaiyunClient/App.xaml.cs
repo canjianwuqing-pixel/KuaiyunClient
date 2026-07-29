@@ -74,7 +74,8 @@ public partial class App : Application
 
             if (new FileInfo(corePath).Length < 1_000_000)
             {
-                throw new InvalidDataException("core\\mihomo.exe 文件大小异常。", corePath);
+                throw new InvalidDataException(
+                    $"core\\mihomo.exe 文件大小异常：{corePath}");
             }
 
             using (JsonDocument bootstrap = JsonDocument.Parse(File.ReadAllText(bootstrapPath)))
@@ -83,7 +84,8 @@ public partial class App : Application
                     || cloudConfig.ValueKind != JsonValueKind.Array
                     || cloudConfig.GetArrayLength() == 0)
                 {
-                    throw new InvalidDataException("bootstrap.json 缺少 CloudConfig 地址。", bootstrapPath);
+                    throw new InvalidDataException(
+                        $"bootstrap.json 缺少 CloudConfig 地址：{bootstrapPath}");
                 }
             }
 
