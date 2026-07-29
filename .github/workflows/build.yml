@@ -29,24 +29,30 @@ jobs:
         shell: pwsh
         run: dotnet build .\src\KuaiyunClient\KuaiyunClient.csproj -c Release
 
-      - name: Publish Windows x64
+      - name: Publish compact Windows x64 package
         shell: pwsh
         run: >-
           dotnet publish .\src\KuaiyunClient\KuaiyunClient.csproj
           -c Release
           -r win-x64
           --self-contained true
-          -p:PublishSingleFile=false
+          -p:PublishSingleFile=true
           -p:PublishTrimmed=false
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
           -o .\artifacts\KuaiyunClient-win-x64
 
-      - name: Verify package
+      - name: Verify compact package
         shell: pwsh
         run: |
+          $package = ".\artifacts\KuaiyunClient-win-x64"
           $required = @(
-            ".\artifacts\KuaiyunClient-win-x64\KuaiyunClient.exe",
-            ".\artifacts\KuaiyunClient-win-x64\bootstrap.json",
-            ".\artifacts\KuaiyunClient-win-x64\core\mihomo.exe"
+            "$package\KuaiyunClient.exe",
+            "$package\bootstrap.json",
+            "$package\core\mihomo.exe",
+            "$package\core\version.txt"
           )
 
           foreach ($path in $required) {
@@ -55,9 +61,99 @@ jobs:
             }
           }
 
-      - name: Upload Windows package
+          $topLevelFiles = Get-ChildItem $package -File
+          $unexpected = $topLevelFiles | Where-Object {
+            $_.Name -notin @("KuaiyunClient.exe", "bootstrap.json")
+          }
+
+          if ($unexpected) {
+            $names = ($unexpected.Name -join ", ")
+            throw "Unexpected top-level package files: $names"
+          }
+
+          $appSize = (Get-Item "$package\KuaiyunClient.exe").Length
+          if ($appSize -lt 10MB) {
+            throw "KuaiyunClient.exe is unexpectedly small; .NET runtime may not be bundled."
+          }
+
+          Write-Host "Compact package verified."
+          Write-Host "Top-level files: $($topLevelFiles.Name -join ', ')"
+          Write-Host "Application size: $([Math]::Round($appSize / 1MB, 2)) MB"
+
+      - name: Run packaged startup self-test
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path ".\artifacts\KuaiyunClient-win-x64\KuaiyunClient.exe"
+          $process = Start-Process `
+            -FilePath $exe `
+            -ArgumentList "--self-test" `
+            -PassThru `
+            -Wait
+
+          $logPath = Join-Path $env:LOCALAPPDATA "KuaiyunClient\logs\startup.log"
+          if (Test-Path $logPath) {
+            Write-Host "----- startup.log -----"
+            Get-Content $logPath
+            Write-Host "-----------------------"
+          }
+
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged application startup self-test failed with exit code $($process.ExitCode)."
+          }
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          $isccPath = if ($command) { $command.Source } else { $null }
+
+          if (-not $isccPath) {
+            choco install innosetup --yes --no-progress
+            $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            $isccPath = if ($command) { $command.Source } else { $null }
+          }
+
+          if (-not $isccPath) {
+            $fallback = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+            if (Test-Path $fallback) {
+              $isccPath = $fallback
+            }
+          }
+
+          if (-not $isccPath) {
+            throw "Inno Setup compiler was not found."
+          }
+
+          & $isccPath .\installer\KuaiyunClient.iss
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Verify installer
+        shell: pwsh
+        run: |
+          $installer = ".\artifacts\installer\KuaiyunClient-Setup.exe"
+          if (-not (Test-Path $installer)) {
+            throw "Missing installer: $installer"
+          }
+
+          $size = (Get-Item $installer).Length
+          if ($size -lt 10MB) {
+            throw "Installer is unexpectedly small."
+          }
+
+          Write-Host "Installer size: $([Math]::Round($size / 1MB, 2)) MB"
+
+      - name: Upload portable Windows package
         uses: actions/upload-artifact@v4
         with:
-          name: KuaiyunClient-win-x64
+          name: KuaiyunClient-win-x64-portable
           path: artifacts/KuaiyunClient-win-x64/
+          if-no-files-found: error
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: KuaiyunClient-Setup
+          path: artifacts/installer/KuaiyunClient-Setup.exe
           if-no-files-found: error
