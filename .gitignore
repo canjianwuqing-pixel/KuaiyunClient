@@ -6,3 +6,5 @@
 *.suo
 *.log
 artifacts/
+src/KuaiyunClient/core/mihomo.exe
+src/KuaiyunClient/core/version.txt
