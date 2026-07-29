@@ -9,6 +9,10 @@ namespace KuaiyunClient;
 
 public partial class ShellWindow : Window
 {
+    private const string DelayTestUrl = "https://www.gstatic.com/generate_204";
+    private const int DelayTestTimeoutMilliseconds = 5000;
+    private const int DelayTestConcurrency = 6;
+
     private readonly LoginView _loginView = new();
     private readonly HomeView _homeView = new();
     private readonly NodesView _nodesView = new();
@@ -25,6 +29,7 @@ public partial class ShellWindow : Window
     private bool _loginBusy;
     private bool _subscriptionBusy;
     private bool _connectionBusy;
+    private bool _delayTestBusy;
 
     private static readonly Brush ActiveBrush = new SolidColorBrush(Color.FromRgb(32, 58, 87));
     private static readonly Brush InactiveBrush = Brushes.Transparent;
@@ -38,6 +43,7 @@ public partial class ShellWindow : Window
         _loginView.LoginRequested += LoginView_LoginRequested;
         _homeView.ConnectionToggleRequested += HomeView_ConnectionToggleRequested;
         _nodesView.RefreshRequested += NodesView_RefreshRequested;
+        _nodesView.DelayTestRequested += NodesView_DelayTestRequested;
         _nodesView.NodeSelectionRequested += NodesView_NodeSelectionRequested;
         _mihomoService.Exited += MihomoService_Exited;
 
@@ -137,6 +143,12 @@ public partial class ShellWindow : Window
             return;
         }
 
+        if (_delayTestBusy)
+        {
+            _homeView.ShowConnectionError("节点测速正在进行，请等待测速完成。");
+            return;
+        }
+
         _connectionBusy = true;
 
         try
@@ -205,6 +217,12 @@ public partial class ShellWindow : Window
 
     private async void NodesView_RefreshRequested(object? sender, EventArgs e)
     {
+        if (_delayTestBusy)
+        {
+            _nodesView.ShowStatus("节点测速正在进行，请等待测速完成。");
+            return;
+        }
+
         if (_mihomoService.IsRunning)
         {
             _nodesView.ShowStatus("请先断开连接，再刷新订阅。");
@@ -214,8 +232,118 @@ public partial class ShellWindow : Window
         await RefreshSubscriptionAsync();
     }
 
+    private async void NodesView_DelayTestRequested(object? sender, EventArgs e)
+    {
+        if (_delayTestBusy || _connectionBusy)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_subscriptionYaml))
+        {
+            _nodesView.ShowStatus("尚未加载订阅，无法测速。");
+            return;
+        }
+
+        IReadOnlyList<ProxyNode> nodes = _nodesView.GetNodesSnapshot();
+        if (nodes.Count == 0)
+        {
+            _nodesView.ShowStatus("当前没有可测速的节点。");
+            return;
+        }
+
+        _delayTestBusy = true;
+        bool startedForTest = !_mihomoService.IsRunning;
+        int successCount = 0;
+        int completedCount = 0;
+
+        foreach (ProxyNode node in nodes)
+        {
+            node.BeginDelayTest();
+        }
+
+        _nodesView.SetBusy(true, $"准备测速，共 {nodes.Count} 个节点...");
+
+        try
+        {
+            if (startedForTest)
+            {
+                await _mihomoService.StartAsync(_subscriptionYaml);
+            }
+
+            using SemaphoreSlim concurrency = new(DelayTestConcurrency, DelayTestConcurrency);
+
+            Task[] tests = nodes.Select(async node =>
+            {
+                await concurrency.WaitAsync();
+                try
+                {
+                    int? delay = await _mihomoService.TestDelayAsync(
+                        node,
+                        DelayTestUrl,
+                        DelayTestTimeoutMilliseconds);
+
+                    node.CompleteDelayTest(delay);
+                    if (delay is > 0)
+                    {
+                        Interlocked.Increment(ref successCount);
+                    }
+                }
+                catch
+                {
+                    node.CompleteDelayTest(null);
+                }
+                finally
+                {
+                    concurrency.Release();
+                    int completed = Interlocked.Increment(ref completedCount);
+                    int available = Volatile.Read(ref successCount);
+                    await Dispatcher.InvokeAsync(() =>
+                        _nodesView.ShowDelayProgress(completed, nodes.Count, available));
+                }
+            }).ToArray();
+
+            await Task.WhenAll(tests);
+
+            _nodesView.SetBusy(
+                false,
+                $"测速完成：{successCount}/{nodes.Count} 个节点可用，超时时间 {DelayTestTimeoutMilliseconds / 1000} 秒。");
+        }
+        catch (Exception ex)
+        {
+            foreach (ProxyNode node in nodes.Where(node => node.DelayState == DelayTestState.Testing))
+            {
+                node.CompleteDelayTest(null);
+            }
+
+            _nodesView.SetBusy(false, "测速失败：" + ex.Message);
+        }
+        finally
+        {
+            if (startedForTest && _mihomoService.IsRunning)
+            {
+                try
+                {
+                    await _mihomoService.StopAsync();
+                }
+                catch (Exception ex)
+                {
+                    _nodesView.ShowStatus("测速已结束，但临时 Mihomo 停止失败：" + ex.Message);
+                }
+            }
+
+            _delayTestBusy = false;
+        }
+    }
+
     private async void NodesView_NodeSelectionRequested(object? sender, ProxyNode node)
     {
+        if (_delayTestBusy)
+        {
+            _nodesView.ShowStatus("节点测速正在进行，请等待测速完成后再切换。");
+            return;
+        }
+
         if (!_mihomoService.IsRunning)
         {
             _selectedNode = node;
