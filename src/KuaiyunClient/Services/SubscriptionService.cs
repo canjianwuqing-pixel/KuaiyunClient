@@ -37,7 +37,19 @@ public sealed class SubscriptionService
         IReadOnlyList<ProxyNode> nodes = _parser.Parse(yaml);
         await SaveAsync(yaml, cancellationToken);
 
-        return new SubscriptionLoadResult(nodes, _subscriptionPath);
+        return new SubscriptionLoadResult(nodes, _subscriptionPath, yaml);
+    }
+
+    public async Task<string?> ReadCachedYamlAsync(
+        CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(_subscriptionPath))
+        {
+            return null;
+        }
+
+        string yaml = await File.ReadAllTextAsync(_subscriptionPath, cancellationToken);
+        return string.IsNullOrWhiteSpace(yaml) ? null : yaml;
     }
 
     private async Task SaveAsync(
@@ -57,4 +69,5 @@ public sealed class SubscriptionService
 
 public sealed record SubscriptionLoadResult(
     IReadOnlyList<ProxyNode> Nodes,
-    string CachePath);
+    string CachePath,
+    string Yaml);
