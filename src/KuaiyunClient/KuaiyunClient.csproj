@@ -7,9 +7,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>KuaiyunClient</AssemblyName>
     <RootNamespace>KuaiyunClient</RootNamespace>
-    <Version>0.1.0</Version>
-    <AssemblyVersion>0.1.0.0</AssemblyVersion>
-    <FileVersion>0.1.0.0</FileVersion>
+    <Version>0.1.2</Version>
+    <AssemblyVersion>0.1.2.0</AssemblyVersion>
+    <FileVersion>0.1.2.0</FileVersion>
     <Product>快云加速</Product>
     <Company>快云加速</Company>
     <Description>快云加速 Windows 官方客户端</Description>
@@ -39,6 +39,18 @@
 
     <Content Include="core\mihomo.exe"
              Condition="Exists('core\mihomo.exe')"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             ExcludeFromSingleFile="true" />
+
+    <Content Include="core\geoip.metadb"
+             Condition="Exists('core\geoip.metadb')"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             ExcludeFromSingleFile="true" />
+
+    <Content Include="core\geosite.dat"
+             Condition="Exists('core\geosite.dat')"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest"
              ExcludeFromSingleFile="true" />

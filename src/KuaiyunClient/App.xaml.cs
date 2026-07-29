@@ -9,11 +9,15 @@ namespace KuaiyunClient;
 public partial class App : Application
 {
     private const string SelfTestArgument = "--self-test";
+    private const long MinimumGeoIpSize = 256 * 1024;
+    private const long MinimumGeoSiteSize = 1024 * 1024;
 
     private const string MihomoSmokeTestConfig = """
 proxies: []
 proxy-groups: []
 rules:
+  - GEOSITE,gfw,DIRECT
+  - GEOIP,CN,DIRECT
   - MATCH,DIRECT
 """;
 
@@ -69,23 +73,15 @@ rules:
             WriteLog("开始执行 Windows 发布包启动自检。", null);
 
             string bootstrapPath = Path.Combine(AppContext.BaseDirectory, "bootstrap.json");
-            string corePath = Path.Combine(AppContext.BaseDirectory, "core", "mihomo.exe");
+            string coreDirectory = Path.Combine(AppContext.BaseDirectory, "core");
+            string corePath = Path.Combine(coreDirectory, "mihomo.exe");
+            string geoIpPath = Path.Combine(coreDirectory, "geoip.metadb");
+            string geoSitePath = Path.Combine(coreDirectory, "geosite.dat");
 
-            if (!File.Exists(bootstrapPath))
-            {
-                throw new FileNotFoundException("发布包缺少 bootstrap.json。", bootstrapPath);
-            }
-
-            if (!File.Exists(corePath))
-            {
-                throw new FileNotFoundException("发布包缺少 core\\mihomo.exe。", corePath);
-            }
-
-            if (new FileInfo(corePath).Length < 1_000_000)
-            {
-                throw new InvalidDataException(
-                    $"core\\mihomo.exe 文件大小异常：{corePath}");
-            }
+            ValidatePackagedFile(bootstrapPath, 10, "bootstrap.json");
+            ValidatePackagedFile(corePath, 1_000_000, "core\\mihomo.exe");
+            ValidatePackagedFile(geoIpPath, MinimumGeoIpSize, "core\\geoip.metadb");
+            ValidatePackagedFile(geoSitePath, MinimumGeoSiteSize, "core\\geosite.dat");
 
             using (JsonDocument bootstrap = JsonDocument.Parse(File.ReadAllText(bootstrapPath)))
             {
@@ -98,12 +94,14 @@ rules:
                 }
             }
 
+            WriteLog("内置 Mihomo 与 Geo 数据文件自检通过。", null);
+
             // 创建完整主窗口及所有子页面，验证 WPF XAML、资源和构造流程可以正常加载。
             ShellWindow window = new();
             GC.KeepAlive(window);
             WriteLog("WPF 页面与资源自检通过。", null);
 
-            // 在后台线程真实启动 Mihomo，验证配置校验、Controller 监听和停止流程。
+            // 在后台线程真实启动 Mihomo，强制加载 GEOSITE 和 GEOIP 数据并验证 Controller。
             Task.Run(RunMihomoSmokeTestAsync).GetAwaiter().GetResult();
 
             WriteLog("Windows 发布包启动自检通过。", null);
@@ -118,18 +116,51 @@ rules:
 
     private static async Task RunMihomoSmokeTestAsync()
     {
-        WriteLog("开始执行 Mihomo Controller 启动自检。", null);
+        WriteLog("开始执行 Mihomo 离线 Geo 数据与 Controller 启动自检。", null);
 
         using MihomoService service = new();
         await service.StartAsync(MihomoSmokeTestConfig, CancellationToken.None);
 
-        if (!service.IsRunning)
+        try
         {
-            throw new InvalidOperationException("Mihomo 自检启动后未保持运行状态。");
+            if (!service.IsRunning)
+            {
+                throw new InvalidOperationException("Mihomo 自检启动后未保持运行状态。");
+            }
+
+            string runtimeDirectory = Path.GetDirectoryName(service.RuntimeConfigPath)
+                ?? throw new InvalidOperationException("无法确定 Mihomo runtime 目录。");
+
+            ValidatePackagedFile(
+                Path.Combine(runtimeDirectory, "geoip.metadb"),
+                MinimumGeoIpSize,
+                "runtime\\geoip.metadb");
+            ValidatePackagedFile(
+                Path.Combine(runtimeDirectory, "geosite.dat"),
+                MinimumGeoSiteSize,
+                "runtime\\geosite.dat");
+        }
+        finally
+        {
+            await service.StopAsync(CancellationToken.None);
         }
 
-        await service.StopAsync(CancellationToken.None);
-        WriteLog("Mihomo Controller 启动与停止自检通过。", null);
+        WriteLog("Mihomo 离线 Geo 数据加载、Controller 启动与停止自检通过。", null);
+    }
+
+    private static void ValidatePackagedFile(string path, long minimumSize, string displayName)
+    {
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException($"发布包缺少 {displayName}。", path);
+        }
+
+        long length = new FileInfo(path).Length;
+        if (length < minimumSize)
+        {
+            throw new InvalidDataException(
+                $"{displayName} 文件大小异常：{length} 字节；路径：{path}");
+        }
     }
 
     private void Application_DispatcherUnhandledException(

@@ -21,7 +21,7 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Download Mihomo
+      - name: Download Mihomo and offline Geo data
         shell: pwsh
         run: .\scripts\download-mihomo.ps1
 
@@ -52,12 +52,28 @@ jobs:
             "$package\KuaiyunClient.exe",
             "$package\bootstrap.json",
             "$package\core\mihomo.exe",
+            "$package\core\geoip.metadb",
+            "$package\core\geosite.dat",
             "$package\core\version.txt"
           )
 
           foreach ($path in $required) {
             if (-not (Test-Path $path)) {
               throw "Missing required package file: $path"
+            }
+          }
+
+          $minimumSizes = @{
+            "$package\KuaiyunClient.exe" = 10MB
+            "$package\core\mihomo.exe" = 1MB
+            "$package\core\geoip.metadb" = 256KB
+            "$package\core\geosite.dat" = 1MB
+          }
+
+          foreach ($entry in $minimumSizes.GetEnumerator()) {
+            $size = (Get-Item $entry.Key).Length
+            if ($size -lt $entry.Value) {
+              throw "Package file is unexpectedly small: $($entry.Key), $size bytes"
             }
           }
 
@@ -71,18 +87,19 @@ jobs:
             throw "Unexpected top-level package files: $names"
           }
 
-          $appSize = (Get-Item "$package\KuaiyunClient.exe").Length
-          if ($appSize -lt 10MB) {
-            throw "KuaiyunClient.exe is unexpectedly small; .NET runtime may not be bundled."
+          Write-Host "Compact package with offline Geo data verified."
+          Write-Host "Top-level files: $($topLevelFiles.Name -join ', ')"
+          Get-ChildItem "$package\core" -File | ForEach-Object {
+            Write-Host "core/$($_.Name): $([Math]::Round($_.Length / 1MB, 2)) MB"
           }
 
-          Write-Host "Compact package verified."
-          Write-Host "Top-level files: $($topLevelFiles.Name -join ', ')"
-          Write-Host "Application size: $([Math]::Round($appSize / 1MB, 2)) MB"
-
-      - name: Run packaged startup self-test
+      - name: Run packaged offline startup self-test
         shell: pwsh
         run: |
+          $runtime = Join-Path $env:LOCALAPPDATA "KuaiyunClient\runtime"
+          Remove-Item (Join-Path $runtime "geoip.metadb") -Force -ErrorAction SilentlyContinue
+          Remove-Item (Join-Path $runtime "geosite.dat") -Force -ErrorAction SilentlyContinue
+
           $exe = Resolve-Path ".\artifacts\KuaiyunClient-win-x64\KuaiyunClient.exe"
           $process = Start-Process `
             -FilePath $exe `
@@ -98,7 +115,14 @@ jobs:
           }
 
           if ($process.ExitCode -ne 0) {
-            throw "Packaged application startup self-test failed with exit code $($process.ExitCode)."
+            throw "Packaged application offline startup self-test failed with exit code $($process.ExitCode)."
+          }
+
+          foreach ($geoFile in @("geoip.metadb", "geosite.dat")) {
+            $runtimeFile = Join-Path $runtime $geoFile
+            if (-not (Test-Path $runtimeFile)) {
+              throw "Self-test did not copy $geoFile into runtime."
+            }
           }
 
       - name: Build Windows installer
@@ -147,13 +171,13 @@ jobs:
       - name: Upload portable Windows package
         uses: actions/upload-artifact@v4
         with:
-          name: KuaiyunClient-win-x64-portable
+          name: KuaiyunClient-v0.1.2-win-x64-portable
           path: artifacts/KuaiyunClient-win-x64/
           if-no-files-found: error
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: KuaiyunClient-Setup
+          name: KuaiyunClient-v0.1.2-Setup
           path: artifacts/installer/KuaiyunClient-Setup.exe
           if-no-files-found: error

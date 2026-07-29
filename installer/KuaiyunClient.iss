@@ -1,5 +1,5 @@
 #define MyAppName "快云加速"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.2"
 #define MyAppPublisher "快云加速"
 #define MyAppExeName "KuaiyunClient.exe"
 
