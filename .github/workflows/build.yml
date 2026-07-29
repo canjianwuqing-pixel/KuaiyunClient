@@ -83,24 +83,27 @@ jobs:
       - name: Build Windows installer
         shell: pwsh
         run: |
-          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-          if (-not $iscc) {
+          $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          $isccPath = if ($command) { $command.Source } else { $null }
+
+          if (-not $isccPath) {
             choco install innosetup --yes --no-progress
-            $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            $isccPath = if ($command) { $command.Source } else { $null }
           }
 
-          if (-not $iscc) {
+          if (-not $isccPath) {
             $fallback = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
             if (Test-Path $fallback) {
-              $iscc = Get-Item $fallback
+              $isccPath = $fallback
             }
           }
 
-          if (-not $iscc) {
+          if (-not $isccPath) {
             throw "Inno Setup compiler was not found."
           }
 
-          & $iscc.Source .\installer\KuaiyunClient.iss
+          & $isccPath .\installer\KuaiyunClient.iss
           if ($LASTEXITCODE -ne 0) {
             throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
           }
