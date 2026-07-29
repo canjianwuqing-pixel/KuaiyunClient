@@ -12,7 +12,8 @@ public sealed class SystemProxyService : ISystemProxyService, IDisposable
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        WriteIndented = true
+        WriteIndented = true,
+        PropertyNameCaseInsensitive = true
     };
 
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -59,11 +60,7 @@ public sealed class SystemProxyService : ISystemProxyService, IDisposable
                 await SaveBackupAsync(backup, cancellationToken);
             }
 
-            using RegistryKey key = Registry.CurrentUser.CreateSubKey(
-                InternetSettingsPath,
-                writable: true)
-                ?? throw new SystemProxyException("无法打开 Windows Internet Settings 注册表项。");
-
+            using RegistryKey key = OpenWritableInternetSettings();
             key.SetValue("ProxyEnable", 1, RegistryValueKind.DWord);
             key.SetValue("ProxyServer", proxyAddress.Trim(), RegistryValueKind.String);
             key.SetValue(
@@ -74,7 +71,6 @@ public sealed class SystemProxyService : ISystemProxyService, IDisposable
             // 手动代理启用期间移除 PAC 地址，恢复时会写回原值。
             key.DeleteValue("AutoConfigURL", throwOnMissingValue: false);
             key.Flush();
-
             NotifyInternetSettingsChanged();
         }
         catch
@@ -149,20 +145,26 @@ public sealed class SystemProxyService : ISystemProxyService, IDisposable
         {
             string json = await File.ReadAllTextAsync(_backupPath, cancellationToken);
             backup = JsonSerializer.Deserialize<ProxyRegistryBackup>(json, JsonOptions)
-                ?? throw new SystemProxyException("系统代理备份文件内容为空。");
+                ?? throw new JsonException("系统代理备份文件内容为空。");
+
+            ValidateBackup(backup);
         }
         catch (JsonException ex)
         {
+            // 无法可信恢复时，优先关闭指向本地端口的死代理，保证用户能正常上网。
+            DisableManualProxyNoLock();
+            string corruptPath = _backupPath
+                + ".corrupt-"
+                + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            File.Move(_backupPath, corruptPath, overwrite: true);
+
             throw new SystemProxyException(
-                $"系统代理备份文件损坏：{_backupPath}",
+                "系统代理备份文件损坏。客户端已关闭 Windows 手动代理，并保留损坏文件："
+                + corruptPath,
                 ex);
         }
 
-        using RegistryKey key = Registry.CurrentUser.CreateSubKey(
-            InternetSettingsPath,
-            writable: true)
-            ?? throw new SystemProxyException("无法打开 Windows Internet Settings 注册表项。");
-
+        using RegistryKey key = OpenWritableInternetSettings();
         RestoreInt32(key, "ProxyEnable", backup.ProxyEnable);
         RestoreString(key, "ProxyServer", backup.ProxyServer);
         RestoreString(key, "ProxyOverride", backup.ProxyOverride);
@@ -173,24 +175,46 @@ public sealed class SystemProxyService : ISystemProxyService, IDisposable
         File.Delete(_backupPath);
     }
 
-    private static RegistryValueSnapshot<int> CaptureInt32(RegistryKey? key, string name)
+    private static RegistryKey OpenWritableInternetSettings()
     {
-        bool exists = key?.GetValueNames().Contains(name, StringComparer.OrdinalIgnoreCase) == true;
-        return new RegistryValueSnapshot<int>
+        return Registry.CurrentUser.CreateSubKey(InternetSettingsPath, writable: true)
+            ?? throw new SystemProxyException("无法打开 Windows Internet Settings 注册表项。");
+    }
+
+    private static void ValidateBackup(ProxyRegistryBackup backup)
+    {
+        if (backup.ProxyEnable is null
+            || backup.ProxyServer is null
+            || backup.ProxyOverride is null
+            || backup.AutoConfigUrl is null)
+        {
+            throw new JsonException("系统代理备份缺少必要字段。");
+        }
+    }
+
+    private static RegistryInt32Snapshot CaptureInt32(RegistryKey? key, string name)
+    {
+        bool exists = HasRegistryValue(key, name);
+        return new RegistryInt32Snapshot
         {
             Exists = exists,
             Value = exists ? ReadInt32(key, name) : null
         };
     }
 
-    private static RegistryValueSnapshot<string> CaptureString(RegistryKey? key, string name)
+    private static RegistryStringSnapshot CaptureString(RegistryKey? key, string name)
     {
-        bool exists = key?.GetValueNames().Contains(name, StringComparer.OrdinalIgnoreCase) == true;
-        return new RegistryValueSnapshot<string>
+        bool exists = HasRegistryValue(key, name);
+        return new RegistryStringSnapshot
         {
             Exists = exists,
             Value = exists ? key?.GetValue(name)?.ToString() : null
         };
+    }
+
+    private static bool HasRegistryValue(RegistryKey? key, string name)
+    {
+        return key?.GetValueNames().Contains(name, StringComparer.OrdinalIgnoreCase) == true;
     }
 
     private static int? ReadInt32(RegistryKey? key, string name)
@@ -205,11 +229,9 @@ public sealed class SystemProxyService : ISystemProxyService, IDisposable
         {
             return Convert.ToInt32(value);
         }
-        catch (FormatException)
-        {
-            return null;
-        }
-        catch (InvalidCastException)
+        catch (Exception ex) when (ex is FormatException
+                                   or InvalidCastException
+                                   or OverflowException)
         {
             return null;
         }
@@ -218,7 +240,7 @@ public sealed class SystemProxyService : ISystemProxyService, IDisposable
     private static void RestoreInt32(
         RegistryKey key,
         string name,
-        RegistryValueSnapshot<int> snapshot)
+        RegistryInt32Snapshot snapshot)
     {
         if (!snapshot.Exists)
         {
@@ -232,7 +254,7 @@ public sealed class SystemProxyService : ISystemProxyService, IDisposable
     private static void RestoreString(
         RegistryKey key,
         string name,
-        RegistryValueSnapshot<string> snapshot)
+        RegistryStringSnapshot snapshot)
     {
         if (!snapshot.Exists)
         {
@@ -241,6 +263,14 @@ public sealed class SystemProxyService : ISystemProxyService, IDisposable
         }
 
         key.SetValue(name, snapshot.Value ?? string.Empty, RegistryValueKind.String);
+    }
+
+    private static void DisableManualProxyNoLock()
+    {
+        using RegistryKey key = OpenWritableInternetSettings();
+        key.SetValue("ProxyEnable", 0, RegistryValueKind.DWord);
+        key.Flush();
+        NotifyInternetSettingsChanged();
     }
 
     private static void ValidateProxyAddress(string proxyAddress)
@@ -286,20 +316,27 @@ public sealed class ProxyRegistryBackup
 {
     public DateTimeOffset CreatedAtUtc { get; init; }
 
-    public RegistryValueSnapshot<int> ProxyEnable { get; init; } = new();
+    public RegistryInt32Snapshot ProxyEnable { get; init; } = new();
 
-    public RegistryValueSnapshot<string> ProxyServer { get; init; } = new();
+    public RegistryStringSnapshot ProxyServer { get; init; } = new();
 
-    public RegistryValueSnapshot<string> ProxyOverride { get; init; } = new();
+    public RegistryStringSnapshot ProxyOverride { get; init; } = new();
 
-    public RegistryValueSnapshot<string> AutoConfigUrl { get; init; } = new();
+    public RegistryStringSnapshot AutoConfigUrl { get; init; } = new();
 }
 
-public sealed class RegistryValueSnapshot<T>
+public sealed class RegistryInt32Snapshot
 {
     public bool Exists { get; init; }
 
-    public T? Value { get; init; }
+    public int? Value { get; init; }
+}
+
+public sealed class RegistryStringSnapshot
+{
+    public bool Exists { get; init; }
+
+    public string? Value { get; init; }
 }
 
 public sealed class SystemProxyException : Exception
