@@ -17,10 +17,16 @@
         </StackPanel>
 
         <Grid Grid.Row="1" Margin="0,22,0,10">
-            <Button x:Name="RefreshButton" Content="刷新订阅" Width="116"
-                    HorizontalAlignment="Left"
-                    Style="{StaticResource PrimaryButtonStyle}"
-                    Click="RefreshButton_Click" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                <Button x:Name="RefreshButton" Content="刷新订阅" Width="116"
+                        Style="{StaticResource PrimaryButtonStyle}"
+                        Click="RefreshButton_Click" />
+                <Button x:Name="DelayTestButton" Content="全部测速" Width="116"
+                        Margin="12,0,0,0" IsEnabled="False"
+                        Style="{StaticResource PrimaryButtonStyle}"
+                        Click="DelayTestButton_Click" />
+            </StackPanel>
+
             <TextBlock x:Name="SummaryText" Text="0 个节点"
                        Foreground="{StaticResource MutedTextBrush}"
                        HorizontalAlignment="Right" VerticalAlignment="Center" />
