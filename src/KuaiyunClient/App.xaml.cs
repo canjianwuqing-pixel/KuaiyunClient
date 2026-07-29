@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
 
@@ -6,6 +7,7 @@ namespace KuaiyunClient;
 
 public partial class App : Application
 {
+    private const string SelfTestArgument = "--self-test";
     private static readonly object LogGate = new();
 
     public static string StartupLogPath { get; } = Path.Combine(
@@ -23,6 +25,14 @@ public partial class App : Application
 
     private void Application_Startup(object sender, StartupEventArgs e)
     {
+        if (e.Args.Any(argument =>
+                string.Equals(argument, SelfTestArgument, StringComparison.OrdinalIgnoreCase)))
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            Shutdown(RunSelfTest());
+            return;
+        }
+
         try
         {
             WriteLog(
@@ -40,6 +50,54 @@ public partial class App : Application
         {
             ShowFatalError("快云客户端启动失败", ex);
             Shutdown(-1);
+        }
+    }
+
+    private static int RunSelfTest()
+    {
+        try
+        {
+            WriteLog("开始执行 Windows 发布包启动自检。", null);
+
+            string bootstrapPath = Path.Combine(AppContext.BaseDirectory, "bootstrap.json");
+            string corePath = Path.Combine(AppContext.BaseDirectory, "core", "mihomo.exe");
+
+            if (!File.Exists(bootstrapPath))
+            {
+                throw new FileNotFoundException("发布包缺少 bootstrap.json。", bootstrapPath);
+            }
+
+            if (!File.Exists(corePath))
+            {
+                throw new FileNotFoundException("发布包缺少 core\\mihomo.exe。", corePath);
+            }
+
+            if (new FileInfo(corePath).Length < 1_000_000)
+            {
+                throw new InvalidDataException("core\\mihomo.exe 文件大小异常。", corePath);
+            }
+
+            using (JsonDocument bootstrap = JsonDocument.Parse(File.ReadAllText(bootstrapPath)))
+            {
+                if (!bootstrap.RootElement.TryGetProperty("CloudConfig", out JsonElement cloudConfig)
+                    || cloudConfig.ValueKind != JsonValueKind.Array
+                    || cloudConfig.GetArrayLength() == 0)
+                {
+                    throw new InvalidDataException("bootstrap.json 缺少 CloudConfig 地址。", bootstrapPath);
+                }
+            }
+
+            // 创建完整主窗口及所有子页面，验证 WPF XAML、资源和构造流程可以正常加载。
+            ShellWindow window = new();
+            GC.KeepAlive(window);
+
+            WriteLog("Windows 发布包启动自检通过。", null);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            WriteLog("Windows 发布包启动自检失败。", ex);
+            return 1;
         }
     }
 
