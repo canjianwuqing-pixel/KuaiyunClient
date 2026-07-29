@@ -19,13 +19,15 @@
 - Mihomo 运行配置生成
 - Mihomo 启动、停止、日志和健康检查
 - 通过 Mihomo Controller 切换真实节点
+- 通过 Mihomo Controller 测试真实节点延迟
+- 最多 6 个节点并发测速，单节点超时 5 秒
 - Mihomo 异常退出检测
 - GitHub Actions 自动下载内核、编译和发布 Windows x64 测试包
 
 当前尚未完成：
 
-- 真实延迟测速
 - Windows 系统代理开启与恢复
+- 程序异常退出后的系统代理恢复
 - `BuiltInProxy` 应急代理
 - 自动更新
 - 最终 UI 精修
@@ -39,12 +41,37 @@
 → 下载 flag=meta 订阅
 → 解析真实节点与国家图标
 → 用户选择节点
+→ 可选：测试全部节点真实延迟
 → 生成 Mihomo 运行配置
 → 启动 mihomo.exe
 → 等待 Controller 就绪
 → 切换到用户选择的节点
 → 首页显示已连接
 ```
+
+## 真实延迟测速
+
+节点页提供“全部测速”按钮。
+
+测速流程：
+
+```text
+检查订阅和节点
+→ 未运行时临时启动 Mihomo
+→ 最多并发测试 6 个节点
+→ GET /proxies/{节点名}/delay
+→ 单节点最多等待 5 秒
+→ 节点页实时显示 ms 或超时
+→ 临时启动的 Mihomo 在测速结束后自动停止
+```
+
+当前测试地址：
+
+```text
+https://www.gstatic.com/generate_204
+```
+
+测速不会自动切换当前节点，也不会修改 Windows 系统代理。
 
 ## 当前连接范围
 
@@ -62,6 +89,7 @@
 mixed-port: 7890
 allow-lan: false
 bind-address: 127.0.0.1
+unified-delay: true
 external-controller: 127.0.0.1:9090
 tun:
   enable: false
@@ -191,8 +219,7 @@ dotnet publish .\src\KuaiyunClient\KuaiyunClient.csproj `
 
 ## 下一步
 
-1. 通过 Mihomo Controller 测试真实节点延迟。
-2. 实现 Windows 系统代理的开启、保存与恢复。
-3. 增加程序异常退出后的代理恢复。
-4. 接入 `BuiltInProxy` 应急代理。
-5. 实现自动更新并统一精修 UI。
+1. 实现 Windows 系统代理的开启、保存与恢复。
+2. 增加程序异常退出后的系统代理恢复。
+3. 接入 `BuiltInProxy` 应急代理。
+4. 实现自动更新并统一精修 UI。
