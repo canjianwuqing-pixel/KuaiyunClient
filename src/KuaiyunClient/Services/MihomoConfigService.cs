@@ -24,6 +24,12 @@ public sealed class MihomoConfigService
         "secret"
     };
 
+    private static readonly HashSet<string> ManagedTopLevelBlocks = new(
+        StringComparer.OrdinalIgnoreCase)
+    {
+        "tun"
+    };
+
     private readonly string _runtimeDirectory;
     private readonly string _configPath;
     private readonly string _logPath;
@@ -59,7 +65,7 @@ public sealed class MihomoConfigService
             .ToHexString(RandomNumberGenerator.GetBytes(24))
             .ToLowerInvariant();
 
-        string originalConfig = RemoveManagedTopLevelKeys(subscriptionYaml);
+        string originalConfig = RemoveManagedTopLevelEntries(subscriptionYaml);
         string generatedHeader = $$"""
 # 此文件由快云客户端自动生成，请勿手动修改。
 mixed-port: {{MixedPort}}
@@ -69,6 +75,8 @@ mode: rule
 log-level: info
 external-controller: 127.0.0.1:{{ControllerPort}}
 secret: "{{secret}}"
+tun:
+  enable: false
 
 """;
 
@@ -92,7 +100,7 @@ secret: "{{secret}}"
             secret);
     }
 
-    private static string RemoveManagedTopLevelKeys(string yaml)
+    private static string RemoveManagedTopLevelEntries(string yaml)
     {
         string[] lines = yaml
             .Replace("\r\n", "\n", StringComparison.Ordinal)
@@ -101,13 +109,32 @@ secret: "{{secret}}"
             .Split('\n');
 
         StringBuilder output = new(yaml.Length);
+        bool skippingManagedBlock = false;
 
         foreach (string line in lines)
         {
-            if (TryGetTopLevelKey(line, out string? key)
-                && ManagedTopLevelKeys.Contains(key))
+            if (skippingManagedBlock)
             {
-                continue;
+                if (!IsTopLevelContentLine(line))
+                {
+                    continue;
+                }
+
+                skippingManagedBlock = false;
+            }
+
+            if (TryGetTopLevelKey(line, out string? key))
+            {
+                if (ManagedTopLevelBlocks.Contains(key))
+                {
+                    skippingManagedBlock = true;
+                    continue;
+                }
+
+                if (ManagedTopLevelKeys.Contains(key))
+                {
+                    continue;
+                }
             }
 
             output.AppendLine(line);
@@ -116,13 +143,18 @@ secret: "{{secret}}"
         return output.ToString();
     }
 
+    private static bool IsTopLevelContentLine(string line)
+    {
+        return !string.IsNullOrWhiteSpace(line)
+            && !char.IsWhiteSpace(line[0])
+            && !line.TrimStart().StartsWith('#');
+    }
+
     private static bool TryGetTopLevelKey(string line, out string key)
     {
         key = string.Empty;
 
-        if (string.IsNullOrWhiteSpace(line)
-            || char.IsWhiteSpace(line[0])
-            || line.TrimStart().StartsWith('#'))
+        if (!IsTopLevelContentLine(line))
         {
             return false;
         }
