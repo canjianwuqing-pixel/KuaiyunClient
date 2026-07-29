@@ -8,41 +8,66 @@
 
 - `ShellWindow` 主窗口与页面导航
 - 登录页、首页、节点页、设置页
-- `BootstrapConfig` 与 OSS `AppConfig` 模型
 - 多 OSS 配置读取与本地缓存回退
-- V2Board 邮箱密码登录
-- 多个 V2Board API 地址自动重试
+- V2Board 邮箱密码登录与多个 API 地址重试
 - 获取账号邮箱、流量、到期时间和订阅地址
 - 登录成功后下载 `flag=meta` 订阅
 - 保存原始订阅 YAML 到本地
-- 解析 Mihomo YAML 的真实 `proxies` 节点
-- 节点页显示真实名称、协议、服务器和国家/地区
-- 自动识别国家旗帜 Emoji
-- 内置 249 个 ISO 国家和地区，以及欧盟、联合国、科索沃等特殊区域，共 252 个图标条目
-- 支持中文名、英文名、ISO 两位/三位代码、常用城市和机场代码
-- 手动刷新订阅与选择节点框架
-- Mihomo、Windows 系统代理和更新服务接口
-- GitHub Actions Windows 编译检查
+- 解析真实 `proxies` 节点
+- 252 个国家、地区和特殊区域图标目录
+- Mihomo Windows x64 内核下载脚本
+- Mihomo 运行配置生成
+- Mihomo 启动、停止、日志和健康检查
+- 通过 Mihomo Controller 切换真实节点
+- Mihomo 异常退出检测
+- GitHub Actions 自动下载内核、编译和发布 Windows x64 测试包
 
-当前尚未接入 Mihomo 内核、真实延迟测速、系统代理实现、自动更新和内置代理恢复逻辑。
+当前尚未完成：
 
-## 登录和订阅流程
+- 真实延迟测速
+- Windows 系统代理开启与恢复
+- `BuiltInProxy` 应急代理
+- 自动更新
+- 最终 UI 精修
+
+## 完整流程
 
 ```text
 读取 OSS 配置
-→ 用户输入邮箱和密码
-→ 按顺序尝试 RemoteHosts
-→ POST /api/v1/passport/auth/login
-→ 获取 auth_data
-→ GET /api/v1/user/getSubscribe
-→ 获取账号流量、到期时间和 subscribe_url
+→ 用户登录 V2Board
+→ 获取账号和订阅地址
 → 下载 flag=meta 订阅
-→ 解析顶层 proxies 节点
-→ 自动识别国家/地区旗帜
-→ 节点页显示真实线路
+→ 解析真实节点与国家图标
+→ 用户选择节点
+→ 生成 Mihomo 运行配置
+→ 启动 mihomo.exe
+→ 等待 Controller 就绪
+→ 切换到用户选择的节点
+→ 首页显示已连接
 ```
 
-密码只用于当前登录请求，不写入配置文件或本地缓存。
+## 当前连接范围
+
+这一阶段只启动本地 Mihomo 代理：
+
+```text
+127.0.0.1:7890
+```
+
+客户端目前不会修改 Windows 系统代理，也不会自动接管浏览器流量。
+
+运行配置会强制使用：
+
+```yaml
+mixed-port: 7890
+allow-lan: false
+bind-address: 127.0.0.1
+external-controller: 127.0.0.1:9090
+tun:
+  enable: false
+```
+
+即使订阅配置中启用了 TUN，客户端生成运行配置时也会将其关闭。
 
 ## 本地文件
 
@@ -52,47 +77,49 @@ OSS 配置缓存：
 %LocalAppData%\KuaiyunClient\config\config-cache.json
 ```
 
-最新订阅缓存：
+原始订阅缓存：
 
 ```text
 %LocalAppData%\KuaiyunClient\subscription\current.yaml
 ```
 
-## 国家和地区图标
-
-节点页使用 Windows 自带的旗帜 Emoji，不需要在安装包中放置大量图片。
-
-客户端图标目录目前支持 252 个国家、地区和特殊区域。节点页显示的“实际国家/地区数”取决于当前用户订阅中真实存在的线路，客户端不会虚构不存在的国家节点。
-
-识别顺序：
-
-1. 节点名称中已经存在的旗帜。
-2. 完整目录中的中文名和英文名。
-3. ISO 两位和三位国家代码。
-4. 常见城市、机场代码和线路简称。
-5. 无法判断时显示 `🌐`，不会伪造国家。
-
-延迟目前显示“未测速”，等待 Mihomo Controller 接入后再显示真实延迟。
-
-## 配置读取流程
+Mihomo 运行配置：
 
 ```text
-启动客户端
-→ 读取程序目录中的 bootstrap.json
-→ 缓存仍在有效期内时直接使用缓存
-→ 缓存过期后按顺序访问多个 OSS config.json
-→ 首个有效配置写入本地缓存
-→ 所有 OSS 失败时使用旧缓存
-→ OSS 和缓存都不可用时显示配置错误
+%LocalAppData%\KuaiyunClient\runtime\config.yaml
 ```
+
+Mihomo 日志：
+
+```text
+%LocalAppData%\KuaiyunClient\runtime\mihomo.log
+```
+
+## Mihomo 内核
+
+内核不会直接提交到 Git 仓库。开发或本地打包前运行：
+
+```powershell
+.\scripts\download-mihomo.ps1
+```
+
+脚本会从 Mihomo 官方 GitHub Release 下载 Windows amd64 兼容版，并保存到：
+
+```text
+src\KuaiyunClient\core\mihomo.exe
+```
+
+也可以指定版本：
+
+```powershell
+.\scripts\download-mihomo.ps1 -Version v版本号
+```
+
+GitHub Actions 会在构建前自动执行该脚本。
 
 ## 配置原则
 
-- 安装包内的 `bootstrap.json`：只保存多个 OSS 配置地址和刷新间隔。
-- OSS 的 `config.json`：只保存品牌、API 地址、客服、更新地址和 `BuiltInProxy`。
-- 后台固定使用 V2Board，订阅格式固定使用 `meta`，不再放入 OSS 配置。
-
-## bootstrap.json 示例
+安装包中的 `bootstrap.json` 只保存多个 OSS 地址：
 
 ```json
 {
@@ -104,7 +131,7 @@ OSS 配置缓存：
 }
 ```
 
-## OSS config.json 示例
+OSS 的 `config.json`：
 
 ```json
 {
@@ -122,6 +149,8 @@ OSS 配置缓存：
 }
 ```
 
+后台固定使用 V2Board，订阅格式固定为 `meta`，不再配置 `RemoteType` 和 `SubFlag`。
+
 ## 项目结构
 
 ```text
@@ -129,31 +158,41 @@ KuaiyunClient/
 ├─ config/
 │  ├─ bootstrap.example.json
 │  └─ config.example.json
+├─ scripts/
+│  └─ download-mihomo.ps1
 ├─ src/KuaiyunClient/
 │  ├─ Models/
 │  ├─ Services/
 │  ├─ Views/
+│  ├─ core/                 # 构建时生成，不提交 mihomo.exe
 │  ├─ App.xaml
 │  ├─ ShellWindow.xaml
 │  └─ KuaiyunClient.csproj
 └─ .github/workflows/build.yml
 ```
 
-## 技术栈
-
-- .NET 8
-- WPF
-- Windows x64
-
-## 构建
+## 本地构建
 
 ```powershell
+.\scripts\download-mihomo.ps1
 dotnet build .\src\KuaiyunClient\KuaiyunClient.csproj -c Release
+```
+
+发布 Windows x64：
+
+```powershell
+dotnet publish .\src\KuaiyunClient\KuaiyunClient.csproj `
+  -c Release `
+  -r win-x64 `
+  --self-contained true `
+  -p:PublishSingleFile=false `
+  -o .\artifacts\KuaiyunClient-win-x64
 ```
 
 ## 下一步
 
-1. 接入 Mihomo 内核启动和停止。
-2. 通过 Mihomo Controller 获取真实延迟并切换节点。
-3. 实现 Windows 系统代理设置与异常恢复。
-4. 实现自动更新与内置代理恢复逻辑。
+1. 通过 Mihomo Controller 测试真实节点延迟。
+2. 实现 Windows 系统代理的开启、保存与恢复。
+3. 增加程序异常退出后的代理恢复。
+4. 接入 `BuiltInProxy` 应急代理。
+5. 实现自动更新并统一精修 UI。
