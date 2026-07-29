@@ -6,49 +6,151 @@
 
 当前仓库已经完成：
 
-- `ShellWindow` 主窗口与登录、首页、节点、设置页面
-- 多 OSS 配置读取、本地缓存与失败回退
+- 登录、首页、节点、设置四个页面
+- 多 OSS 配置读取、本地缓存和失败回退
 - V2Board 邮箱密码登录和多个 API 地址重试
-- 获取账号、流量、到期时间与订阅地址
+- 账号、流量、到期时间和订阅地址读取
 - 下载并缓存 `flag=meta` 订阅
-- 解析真实 Mihomo `proxies` 节点
-- 252 个国家、地区与特殊区域图标目录
-- Mihomo Windows x64 内核下载、启动、停止、日志和健康检查
-- 通过 Mihomo Controller 切换真实节点
-- 最多 6 个节点并发真实延迟测速
-- Windows 系统代理备份、启用、恢复与异常退出保护
+- 解析真实 Mihomo 节点
+- 252 个国家、地区和特殊区域图标目录
+- Mihomo 内核下载、启动、停止、日志和健康检查
+- 真实节点切换和最多 6 路并发延迟测速
+- Windows 系统代理备份、启用、恢复和异常保护
+- `BuiltInProxy` 应急代理和故障恢复
 - 设置项本地保存
-- GitHub Actions 自动下载内核、编译和发布 Windows x64 测试包
+- GitHub Actions Windows x64 构建与发布
 
 当前尚未完成：
 
-- `BuiltInProxy` 应急代理
 - 自动更新
 - 开机启动和启动后自动连接的实际执行逻辑
 - 最终 UI 精修、托盘和连接动画
 
-## 完整连接流程
+## 正常连接流程
 
 ```text
 读取 OSS 配置
-→ 用户登录 V2Board
-→ 获取账号和订阅地址
-→ 下载 flag=meta 订阅
-→ 解析真实节点与国家图标
-→ 用户选择节点
-→ 可选：测试全部节点真实延迟
-→ 生成 Mihomo 运行配置
-→ 启动 mihomo.exe
-→ 等待 Controller 就绪
-→ 切换到用户选择的节点
+→ 登录 V2Board
+→ 获取账号和订阅
+→ 解析真实节点
+→ 选择或测速节点
+→ 启动 Mihomo
+→ 切换节点
 → 备份 Windows 原系统代理
-→ 启用 127.0.0.1:7890 系统代理
+→ 启用 127.0.0.1:7890
 → 首页显示已连接
 ```
 
-## Windows 系统代理安全机制
+## BuiltInProxy 应急代理
 
-设置页默认开启“连接时使用 Windows 系统代理”。
+客户端始终优先直连，不会默认使用应急代理。
+
+触发顺序：
+
+```text
+正常直连
+→ 所有 OSS/API/订阅地址直连失败
+→ 按 BuiltInProxy 配置顺序逐个尝试
+→ 第一个成功的应急代理继续原请求
+→ 全部失败后使用旧缓存或显示明确错误
+```
+
+支持的格式：
+
+```text
+http://用户名:密码@服务器:端口
+https://用户名:密码@服务器:端口
+socks4://用户名:密码@服务器:端口
+socks4a://用户名:密码@服务器:端口
+socks5://用户名:密码@服务器:端口
+ss://完整的 Shadowsocks 分享链接
+```
+
+HTTP 和 SOCKS 代理由 `HttpClient` 直接使用。Shadowsocks 会临时启动一个独立 Mihomo 恢复通道，请求结束后立即停止并清理临时目录。
+
+应急通道：
+
+- 不修改 Windows 系统代理
+- 不接管用户浏览器流量
+- 不改变主连接节点
+- 不与正常的 Mihomo 运行配置共用端口
+- 错误信息不会显示代理密码
+
+### OSS 恢复限制
+
+`BuiltInProxy` 位于远程 `config.json` 中。首次安装且本地完全没有配置缓存时，客户端尚不知道应急代理内容，因此只能直连多个 OSS。
+
+客户端至少成功读取过一次配置后，会把 `BuiltInProxy` 缓存到：
+
+```text
+%LocalAppData%\KuaiyunClient\config\config-cache.json
+```
+
+以后 OSS 直连全部失败时，可以使用缓存中的应急代理刷新远程配置。无论应急代理是否成功，仍保留旧缓存作为最终回退。
+
+### Shadowsocks 限制
+
+当前支持标准 SIP002 `ss://` 分享链接，包括：
+
+```text
+ss://BASE64(method:password)@server:port
+ss://BASE64(method:password@server:port)
+```
+
+暂不支持带 `plugin` 参数的 Shadowsocks 分享链接。
+
+### 配置安全
+
+代理地址、用户名和密码会存在 OSS `config.json` 以及客户端本地配置缓存中。不要把含真实代理凭据的配置文件放在公开仓库；应限制 OSS 文件访问或使用专门的低权限应急代理。
+
+建议只配置 2–3 条不同网络和地区的应急代理，避免全部位于同一服务商或同一 IP 段。
+
+## OSS config.json
+
+```json
+{
+  "AppName": "快云加速",
+  "AppLogo": "https://software.lvoeky.com/logo.png",
+  "HomePage": "https://lvoeky.com",
+  "TelegramGroup": "https://t.me/kuaiyunjs",
+  "SupportApi": "crisp://替换为你的TOKEN",
+  "UpdateUrl": "https://software.lvoeky.com/update.json",
+  "UserAgent": "kuaiyun",
+  "RemoteHosts": [
+    "https://love.kuaiyun51.org"
+  ],
+  "BuiltInProxy": []
+}
+```
+
+配置真实应急代理时，把完整代理 URI 放进数组。例如：
+
+```json
+{
+  "BuiltInProxy": [
+    "socks5://user:password@proxy-a.example.com:1080",
+    "http://user:password@proxy-b.example.com:8080"
+  ]
+}
+```
+
+Shadowsocks 请直接粘贴服务商提供的完整 `ss://` 分享链接，不要手工拆分字段。
+
+## bootstrap.json
+
+安装包中的 `bootstrap.json` 只保存多个 OSS 地址和刷新时间：
+
+```json
+{
+  "CloudConfig": [
+    "https://software.lvoeky.com/config.json",
+    "https://备用OSS/config.json"
+  ],
+  "CloudUpdateHours": 3
+}
+```
+
+## Windows 系统代理安全机制
 
 连接时：
 
@@ -68,18 +170,12 @@
 
 如果恢复失败，客户端不会停止 Mihomo，避免系统代理继续指向已经关闭的本地端口而导致断网。
 
-程序正常退出时会先恢复代理，再停止 Mihomo。Mihomo 意外退出时也会立即尝试恢复代理。如果程序被强制结束或电脑断电，下次启动客户端会检测备份文件并自动恢复。
+程序被强制结束或电脑断电后，下次启动会检测备份并自动恢复。
 
-系统代理备份路径：
+备份路径：
 
 ```text
 %LocalAppData%\KuaiyunClient\state\proxy-backup.json
-```
-
-如果备份文件损坏，客户端会关闭 Windows 手动代理，并将损坏文件保留为：
-
-```text
-proxy-backup.json.corrupt-年月日-时分秒
 ```
 
 客户端只修改当前 Windows 用户的 Internet Settings，不修改 WinHTTP 全局代理。
@@ -95,20 +191,18 @@ proxy-backup.json.corrupt-年月日-时分秒
 → GET /proxies/{节点名}/delay
 → 单节点最多等待 5 秒
 → 实时显示 ms 或超时
-→ 临时启动的 Mihomo 在测速结束后自动停止
+→ 测速结束后停止临时 Mihomo
 ```
 
-当前测试地址：
+测试地址：
 
 ```text
 https://www.gstatic.com/generate_204
 ```
 
-测速不会自动切换当前节点，也不会开启 Windows 系统代理。
+测速不会切换节点，也不会开启 Windows 系统代理。
 
 ## Mihomo 运行范围
-
-客户端生成的运行配置固定包含：
 
 ```yaml
 mixed-port: 7890
@@ -120,89 +214,17 @@ tun:
   enable: false
 ```
 
-即使订阅配置启用了 TUN，客户端也会强制关闭，只通过本机混合代理端口运行。
+即使订阅启用了 TUN，客户端也会强制关闭，只通过本机混合代理端口运行。
 
 ## 本地文件
 
-OSS 配置缓存：
-
 ```text
 %LocalAppData%\KuaiyunClient\config\config-cache.json
-```
-
-原始订阅缓存：
-
-```text
 %LocalAppData%\KuaiyunClient\subscription\current.yaml
-```
-
-Mihomo 运行配置：
-
-```text
 %LocalAppData%\KuaiyunClient\runtime\config.yaml
-```
-
-Mihomo 日志：
-
-```text
 %LocalAppData%\KuaiyunClient\runtime\mihomo.log
-```
-
-客户端设置：
-
-```text
 %LocalAppData%\KuaiyunClient\settings\client-settings.json
 ```
-
-## Mihomo 内核
-
-内核不会直接提交到 Git 仓库。开发或本地打包前运行：
-
-```powershell
-.\scripts\download-mihomo.ps1
-```
-
-脚本会下载 Windows amd64 兼容版并保存到：
-
-```text
-src\KuaiyunClient\core\mihomo.exe
-```
-
-GitHub Actions 会在构建前自动执行下载脚本。
-
-## 配置原则
-
-安装包中的 `bootstrap.json` 只保存多个 OSS 地址：
-
-```json
-{
-  "CloudConfig": [
-    "https://software.lvoeky.com/config.json",
-    "https://备用OSS/config.json"
-  ],
-  "CloudUpdateHours": 3
-}
-```
-
-OSS 的 `config.json`：
-
-```json
-{
-  "AppName": "快云加速",
-  "AppLogo": "https://software.lvoeky.com/logo.png",
-  "HomePage": "https://lvoeky.com",
-  "TelegramGroup": "https://t.me/kuaiyunjs",
-  "SupportApi": "crisp://替换为你的TOKEN",
-  "UpdateUrl": "https://software.lvoeky.com/update.json",
-  "UserAgent": "kuaiyun",
-  "RemoteHosts": [
-    "https://love.kuaiyun51.org"
-  ],
-  "BuiltInProxy": []
-}
-```
-
-后台固定使用 V2Board，订阅格式固定为 `meta`，不配置 `RemoteType` 和 `SubFlag`。
 
 ## 本地构建
 
@@ -224,7 +246,6 @@ dotnet publish .\src\KuaiyunClient\KuaiyunClient.csproj `
 
 ## 下一步
 
-1. 接入 `BuiltInProxy` 应急代理与 API/OSS 故障恢复。
-2. 实现客户端自动更新。
-3. 实现开机启动和自动连接。
-4. 统一精修 UI、托盘图标、窗口按钮和连接动画。
+1. 实现客户端自动更新。
+2. 实现开机启动和自动连接。
+3. 统一精修 UI、托盘图标、窗口按钮和连接动画。
