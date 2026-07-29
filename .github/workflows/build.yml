@@ -5,14 +5,59 @@ on:
     branches: [ main ]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   windows-build:
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+
+      - name: Download Mihomo
+        shell: pwsh
+        run: .\scripts\download-mihomo.ps1
+
       - name: Build
         shell: pwsh
         run: dotnet build .\src\KuaiyunClient\KuaiyunClient.csproj -c Release
+
+      - name: Publish Windows x64
+        shell: pwsh
+        run: >-
+          dotnet publish .\src\KuaiyunClient\KuaiyunClient.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=false
+          -p:PublishTrimmed=false
+          -o .\artifacts\KuaiyunClient-win-x64
+
+      - name: Verify package
+        shell: pwsh
+        run: |
+          $required = @(
+            ".\artifacts\KuaiyunClient-win-x64\KuaiyunClient.exe",
+            ".\artifacts\KuaiyunClient-win-x64\bootstrap.json",
+            ".\artifacts\KuaiyunClient-win-x64\core\mihomo.exe"
+          )
+
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) {
+              throw "Missing required package file: $path"
+            }
+          }
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: KuaiyunClient-win-x64
+          path: artifacts/KuaiyunClient-win-x64/
+          if-no-files-found: error
