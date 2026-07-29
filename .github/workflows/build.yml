@@ -80,6 +80,27 @@ jobs:
           Write-Host "Top-level files: $($topLevelFiles.Name -join ', ')"
           Write-Host "Application size: $([Math]::Round($appSize / 1MB, 2)) MB"
 
+      - name: Run packaged startup self-test
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path ".\artifacts\KuaiyunClient-win-x64\KuaiyunClient.exe"
+          $process = Start-Process `
+            -FilePath $exe `
+            -ArgumentList "--self-test" `
+            -PassThru `
+            -Wait
+
+          $logPath = Join-Path $env:LOCALAPPDATA "KuaiyunClient\logs\startup.log"
+          if (Test-Path $logPath) {
+            Write-Host "----- startup.log -----"
+            Get-Content $logPath
+            Write-Host "-----------------------"
+          }
+
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged application startup self-test failed with exit code $($process.ExitCode)."
+          }
+
       - name: Build Windows installer
         shell: pwsh
         run: |
