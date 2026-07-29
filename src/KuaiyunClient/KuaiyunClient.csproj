@@ -12,6 +12,17 @@
   <ItemGroup>
     <None Include="..\..\config\bootstrap.example.json"
           Link="bootstrap.json"
-          CopyToOutputDirectory="PreserveNewest" />
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+
+    <Content Include="core\mihomo.exe"
+             Condition="Exists('core\mihomo.exe')"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+
+    <None Include="core\version.txt"
+          Condition="Exists('core\version.txt')"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
