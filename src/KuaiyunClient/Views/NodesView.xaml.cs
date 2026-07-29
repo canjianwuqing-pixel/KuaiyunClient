@@ -1,4 +1,5 @@
 using KuaiyunClient.Models;
+using KuaiyunClient.Services;
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -53,11 +54,11 @@ public partial class NodesView : UserControl
             .Count();
 
         SummaryText.Text = countryCount > 0
-            ? $"{_nodes.Count} 个节点 · {countryCount} 个国家/地区"
-            : $"{_nodes.Count} 个节点";
+            ? $"{_nodes.Count} 个节点 · 实际 {countryCount} 个国家/地区 · 图标库 {CountryFlagResolver.SupportedRegionCount}"
+            : $"{_nodes.Count} 个节点 · 图标库 {CountryFlagResolver.SupportedRegionCount}";
 
         StatusText.Text = hasNodes
-            ? "订阅已加载。延迟测速将在接入 Mihomo 后启用。"
+            ? "订阅已加载。国家图标按真实节点名称识别，延迟测速将在接入 Mihomo 后启用。"
             : "订阅中没有可显示的节点。";
 
         RefreshButton.IsEnabled = true;
