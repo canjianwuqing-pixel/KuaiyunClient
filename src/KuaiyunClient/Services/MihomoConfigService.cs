@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -6,7 +8,6 @@ namespace KuaiyunClient.Services;
 public sealed class MihomoConfigService
 {
     public const int MixedPort = 7890;
-    public const int ControllerPort = 9090;
 
     private static readonly HashSet<string> ManagedTopLevelKeys = new(
         StringComparer.OrdinalIgnoreCase)
@@ -62,6 +63,9 @@ public sealed class MihomoConfigService
             throw new MihomoConfigurationException("订阅配置为空，无法启动 Mihomo。");
         }
 
+        EnsureMixedPortAvailable();
+        int controllerPort = ReserveLoopbackPort();
+
         string secret = Convert
             .ToHexString(RandomNumberGenerator.GetBytes(24))
             .ToLowerInvariant();
@@ -75,7 +79,7 @@ bind-address: 127.0.0.1
 mode: rule
 log-level: info
 unified-delay: true
-external-controller: 127.0.0.1:{{ControllerPort}}
+external-controller: "127.0.0.1:{{controllerPort}}"
 secret: "{{secret}}"
 tun:
   enable: false
@@ -98,8 +102,53 @@ tun:
             _configPath,
             _logPath,
             MixedPort,
-            ControllerPort,
+            controllerPort,
             secret);
+    }
+
+    private static void EnsureMixedPortAvailable()
+    {
+        try
+        {
+            using Socket socket = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)
+            {
+                ExclusiveAddressUse = true
+            };
+            socket.Bind(new IPEndPoint(IPAddress.Loopback, MixedPort));
+        }
+        catch (SocketException ex)
+        {
+            throw new MihomoConfigurationException(
+                $"本地代理端口 127.0.0.1:{MixedPort} 已被其他程序占用。"
+                + Environment.NewLine
+                + "请退出其他代理软件或旧版快云客户端后重试。",
+                ex);
+        }
+    }
+
+    private static int ReserveLoopbackPort()
+    {
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            TcpListener listener = new(IPAddress.Loopback, 0);
+            listener.Server.ExclusiveAddressUse = true;
+            listener.Start();
+
+            try
+            {
+                int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+                if (port != MixedPort)
+                {
+                    return port;
+                }
+            }
+            finally
+            {
+                listener.Stop();
+            }
+        }
+
+        throw new MihomoConfigurationException("无法为 Mihomo Controller 分配本地端口。");
     }
 
     private static string RemoveManagedTopLevelEntries(string yaml)
@@ -188,4 +237,15 @@ public sealed record MihomoRuntimeConfig(
     int ControllerPort,
     string Secret);
 
-public sealed class MihomoConfigurationException(string message) : Exception(message);
+public sealed class MihomoConfigurationException : Exception
+{
+    public MihomoConfigurationException(string message)
+        : base(message)
+    {
+    }
+
+    public MihomoConfigurationException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
