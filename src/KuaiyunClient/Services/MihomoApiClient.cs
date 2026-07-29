@@ -1,4 +1,5 @@
 using KuaiyunClient.Models;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -24,7 +25,7 @@ public sealed class MihomoApiClient : IDisposable
         _httpClient = new HttpClient
         {
             BaseAddress = new Uri($"http://127.0.0.1:{controllerPort}/"),
-            Timeout = TimeSpan.FromSeconds(2)
+            Timeout = TimeSpan.FromSeconds(20)
         };
 
         _httpClient.DefaultRequestHeaders.TryAddWithoutValidation(
@@ -140,6 +141,61 @@ public sealed class MihomoApiClient : IDisposable
             throw new MihomoApiException(
                 $"切换节点失败（HTTP {(int)response.StatusCode}）：{body}");
         }
+    }
+
+    public async Task<int?> TestDelayAsync(
+        ProxyNode node,
+        string testUrl,
+        int timeoutMilliseconds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+
+        if (!Uri.TryCreate(testUrl, UriKind.Absolute, out Uri? targetUri)
+            || (targetUri.Scheme != Uri.UriSchemeHttp
+                && targetUri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new ArgumentException("测速地址必须是有效的 HTTP 或 HTTPS 地址。", nameof(testUrl));
+        }
+
+        int timeout = Math.Clamp(timeoutMilliseconds, 1000, 30000);
+        string path = "proxies/"
+            + Uri.EscapeDataString(node.Name)
+            + "/delay?url="
+            + Uri.EscapeDataString(targetUri.AbsoluteUri)
+            + "&timeout="
+            + timeout;
+
+        using HttpResponseMessage response = await _httpClient.GetAsync(path, cancellationToken);
+        string body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            throw new MihomoApiException(
+                $"Mihomo Controller 拒绝测速请求（HTTP {(int)response.StatusCode}）。");
+        }
+
+        if (!response.IsSuccessStatusCode || string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument json = JsonDocument.Parse(body);
+            if (json.RootElement.TryGetProperty("delay", out JsonElement delayElement)
+                && delayElement.TryGetInt32(out int delay)
+                && delay > 0)
+            {
+                return delay;
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return null;
     }
 
     private async Task<JsonDocument> GetProxiesDocumentAsync(
