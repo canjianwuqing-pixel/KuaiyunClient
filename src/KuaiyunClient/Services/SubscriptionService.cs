@@ -34,9 +34,13 @@ public sealed class SubscriptionService
             session,
             cancellationToken);
 
-        IReadOnlyList<ProxyNode> nodes = _parser.Parse(yaml);
-        await SaveAsync(yaml, cancellationToken);
+        IReadOnlyList<ProxyNode> nodes = NormalizeNodes(_parser.Parse(yaml));
+        if (nodes.Count == 0)
+        {
+            throw new SubscriptionParseException("订阅中没有可用线路。");
+        }
 
+        await SaveAsync(yaml, cancellationToken);
         return new SubscriptionLoadResult(nodes, _subscriptionPath, yaml);
     }
 
@@ -50,6 +54,29 @@ public sealed class SubscriptionService
 
         string yaml = await File.ReadAllTextAsync(_subscriptionPath, cancellationToken);
         return string.IsNullOrWhiteSpace(yaml) ? null : yaml;
+    }
+
+    private static IReadOnlyList<ProxyNode> NormalizeNodes(IEnumerable<ProxyNode> source)
+    {
+        return source
+            .Where(node => !SubscriptionNodeFilter.ShouldHide(node.Name))
+            .Select(node =>
+            {
+                NodeLocation location = CountryFlagResolver.Resolve(node.Name);
+                return new ProxyNode
+                {
+                    Name = node.Name,
+                    DisplayName = NodeDisplayNameFormatter.Format(node.Name, location),
+                    GroupName = location.CountryName,
+                    Type = node.Type,
+                    Server = node.Server,
+                    CountryCode = location.CountryCode,
+                    CountryName = location.CountryName,
+                    CountryFlag = location.Flag,
+                    DelayMilliseconds = node.DelayMilliseconds
+                };
+            })
+            .ToArray();
     }
 
     private async Task SaveAsync(

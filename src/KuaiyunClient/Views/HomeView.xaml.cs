@@ -1,12 +1,20 @@
 using KuaiyunClient.Models;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace KuaiyunClient.Views;
 
 public partial class HomeView : UserControl
 {
+    private ProxyNode? _currentNode;
+
     public event EventHandler? ConnectionToggleRequested;
+
+    public event EventHandler? ServerSelectionRequested;
+
+    public event EventHandler? AnnouncementRequested;
 
     public HomeView()
     {
@@ -18,37 +26,72 @@ public partial class HomeView : UserControl
         double used = session.UploadBytes + session.DownloadBytes;
         double remaining = Math.Max(0, session.TransferEnableBytes - used);
 
-        EmailText.Text = session.Email;
         TrafficText.Text = session.TransferEnableBytes > 0
             ? $"{ToGigabytes(remaining):F1} GB"
             : "--";
+        TotalTrafficText.Text = session.TransferEnableBytes > 0
+            ? $"总流量 {ToGigabytes(session.TransferEnableBytes):F0} GB"
+            : "总流量 --";
         ExpiryText.Text = session.ExpiredAt > 0
-            ? DateTimeOffset.FromUnixTimeSeconds(session.ExpiredAt).LocalDateTime.ToString("yyyy-MM-dd")
-            : "--";
+            ? "到期时间 " + DateTimeOffset
+                .FromUnixTimeSeconds(session.ExpiredAt)
+                .LocalDateTime
+                .ToString("yyyy-MM-dd")
+            : "到期时间 --";
+        PlanText.Text = "当前套餐";
     }
 
-    public void SetConnectionBusy(bool busy, string message)
+    public void SetAnnouncement(string? announcement)
     {
-        ConnectionButton.IsEnabled = !busy;
-        ConnectionStateText.Text = message;
-        ConnectionButton.Content = busy ? "处理中" : "连接";
+        AnnouncementText.Text = string.IsNullOrWhiteSpace(announcement)
+            ? "暂无公告"
+            : announcement.Trim();
     }
 
-    public void ShowConnectionState(bool connected, string? nodeName = null)
+    public void SetCurrentNode(ProxyNode? node)
     {
-        ConnectionButton.IsEnabled = true;
-        ConnectionStateText.Text = connected ? "已连接" : "未连接";
-        CurrentNodeText.Text = $"当前节点：{(string.IsNullOrWhiteSpace(nodeName) ? "--" : nodeName)}";
-        ConnectionButton.Content = connected ? "断开" : "连接";
-        ConnectionInfoText.Text = connected
-            ? "Mihomo 已运行。当前尚未开启 Windows 系统代理。"
-            : "当前阶段只启动 Mihomo，不会修改 Windows 系统代理。";
+        _currentNode = node;
+        string name = node?.DisplayName ?? "暂无可用线路";
+        CurrentNodeText.Text = name;
+        ServerNameText.Text = name;
+
+        if (node is null || !File.Exists(node.FlagImagePath))
+        {
+            CurrentFlagImage.Source = null;
+            return;
+        }
+
+        CurrentFlagImage.Source = new BitmapImage(new Uri(node.FlagImagePath, UriKind.Absolute));
     }
 
-    public void ShowConnectionError(string message, string? nodeName = null)
+    public void ShowConnectionState(ConnectionUiState state, ProxyNode? node = null)
     {
-        ShowConnectionState(connected: false, nodeName);
-        ConnectionInfoText.Text = message;
+        if (node is not null || _currentNode is null)
+        {
+            SetCurrentNode(node);
+        }
+
+        ConnectionStateText.Text = state switch
+        {
+            ConnectionUiState.Connecting => "连接中",
+            ConnectionUiState.Connected => "已连接",
+            _ => "未连接"
+        };
+
+        ConnectionButton.IsEnabled = state != ConnectionUiState.Connecting && _currentNode is not null;
+        ConnectionButton.Background = state == ConnectionUiState.Connected
+            ? (Brush)FindResource("AccentBrush")
+            : Brushes.White;
+    }
+
+    public void ShowConnectionError(string message, ProxyNode? node = null)
+    {
+        ShowConnectionState(ConnectionUiState.Disconnected, node);
+        MessageBox.Show(
+            message,
+            "连接提示",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
     }
 
     private void ConnectionButton_Click(object sender, RoutedEventArgs e)
@@ -56,5 +99,22 @@ public partial class HomeView : UserControl
         ConnectionToggleRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    private void ServerButton_Click(object sender, RoutedEventArgs e)
+    {
+        ServerSelectionRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void AnnouncementButton_Click(object sender, RoutedEventArgs e)
+    {
+        AnnouncementRequested?.Invoke(this, EventArgs.Empty);
+    }
+
     private static double ToGigabytes(double bytes) => bytes / 1024d / 1024d / 1024d;
+}
+
+public enum ConnectionUiState
+{
+    Disconnected,
+    Connecting,
+    Connected
 }
