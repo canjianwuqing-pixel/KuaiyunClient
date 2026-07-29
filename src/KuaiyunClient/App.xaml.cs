@@ -1,3 +1,4 @@
+using KuaiyunClient.Services;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
@@ -8,6 +9,14 @@ namespace KuaiyunClient;
 public partial class App : Application
 {
     private const string SelfTestArgument = "--self-test";
+
+    private const string MihomoSmokeTestConfig = """
+proxies: []
+proxy-groups: []
+rules:
+  - MATCH,DIRECT
+""";
+
     private static readonly object LogGate = new();
 
     public static string StartupLogPath { get; } = Path.Combine(
@@ -92,6 +101,10 @@ public partial class App : Application
             // 创建完整主窗口及所有子页面，验证 WPF XAML、资源和构造流程可以正常加载。
             ShellWindow window = new();
             GC.KeepAlive(window);
+            WriteLog("WPF 页面与资源自检通过。", null);
+
+            // 在后台线程真实启动 Mihomo，验证配置校验、Controller 监听和停止流程。
+            Task.Run(RunMihomoSmokeTestAsync).GetAwaiter().GetResult();
 
             WriteLog("Windows 发布包启动自检通过。", null);
             return 0;
@@ -101,6 +114,22 @@ public partial class App : Application
             WriteLog("Windows 发布包启动自检失败。", ex);
             return 1;
         }
+    }
+
+    private static async Task RunMihomoSmokeTestAsync()
+    {
+        WriteLog("开始执行 Mihomo Controller 启动自检。", null);
+
+        using MihomoService service = new();
+        await service.StartAsync(MihomoSmokeTestConfig, CancellationToken.None);
+
+        if (!service.IsRunning)
+        {
+            throw new InvalidOperationException("Mihomo 自检启动后未保持运行状态。");
+        }
+
+        await service.StopAsync(CancellationToken.None);
+        WriteLog("Mihomo Controller 启动与停止自检通过。", null);
     }
 
     private void Application_DispatcherUnhandledException(
