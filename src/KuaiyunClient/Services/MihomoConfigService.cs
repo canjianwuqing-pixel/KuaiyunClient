@@ -9,6 +9,11 @@ public sealed class MihomoConfigService
 {
     public const int MixedPort = 7890;
 
+    private const string GeoIpFileName = "geoip.metadb";
+    private const string GeoSiteFileName = "geosite.dat";
+    private const long MinimumGeoIpSize = 256 * 1024;
+    private const long MinimumGeoSiteSize = 1024 * 1024;
+
     private static readonly HashSet<string> ManagedTopLevelKeys = new(
         StringComparer.OrdinalIgnoreCase)
     {
@@ -23,7 +28,10 @@ public sealed class MihomoConfigService
         "log-level",
         "unified-delay",
         "external-controller",
-        "secret"
+        "secret",
+        "geodata-mode",
+        "geodata-loader",
+        "geo-auto-update"
     };
 
     private static readonly HashSet<string> ManagedTopLevelBlocks = new(
@@ -32,12 +40,14 @@ public sealed class MihomoConfigService
         "tun"
     };
 
+    private readonly string _packagedCoreDirectory;
     private readonly string _runtimeDirectory;
     private readonly string _configPath;
     private readonly string _logPath;
 
     public MihomoConfigService()
     {
+        _packagedCoreDirectory = Path.Combine(AppContext.BaseDirectory, "core");
         _runtimeDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "KuaiyunClient",
@@ -63,6 +73,7 @@ public sealed class MihomoConfigService
             throw new MihomoConfigurationException("订阅配置为空，无法启动 Mihomo。");
         }
 
+        EnsureOfflineGeoData();
         EnsureMixedPortAvailable();
         int controllerPort = ReserveLoopbackPort();
 
@@ -79,6 +90,9 @@ bind-address: 127.0.0.1
 mode: rule
 log-level: info
 unified-delay: true
+geodata-mode: true
+geodata-loader: memconservative
+geo-auto-update: false
 external-controller: "127.0.0.1:{{controllerPort}}"
 secret: "{{secret}}"
 tun:
@@ -104,6 +118,64 @@ tun:
             MixedPort,
             controllerPort,
             secret);
+    }
+
+    private void EnsureOfflineGeoData()
+    {
+        CopyOfflineDataFile(GeoIpFileName, MinimumGeoIpSize);
+        CopyOfflineDataFile(GeoSiteFileName, MinimumGeoSiteSize);
+    }
+
+    private void CopyOfflineDataFile(string fileName, long minimumSize)
+    {
+        string sourcePath = Path.Combine(_packagedCoreDirectory, fileName);
+        if (!File.Exists(sourcePath))
+        {
+            throw new MihomoConfigurationException(
+                $"客户端安装包缺少离线数据文件：core\\{fileName}。"
+                + Environment.NewLine
+                + "请重新下载完整便携版或重新安装客户端。");
+        }
+
+        FileInfo sourceInfo = new(sourcePath);
+        if (sourceInfo.Length < minimumSize)
+        {
+            throw new MihomoConfigurationException(
+                $"客户端内置的 {fileName} 文件大小异常：{sourceInfo.Length} 字节。"
+                + Environment.NewLine
+                + "请重新下载客户端，当前文件可能已损坏。");
+        }
+
+        string destinationPath = Path.Combine(_runtimeDirectory, fileName);
+        string temporaryPath = destinationPath + ".tmp";
+
+        try
+        {
+            File.Copy(sourcePath, temporaryPath, overwrite: true);
+            File.Move(temporaryPath, destinationPath, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new MihomoConfigurationException(
+                $"无法把离线数据文件复制到运行目录：{destinationPath}。"
+                + Environment.NewLine
+                + "请关闭其他代理程序后重试。",
+                ex);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+            catch
+            {
+                // 临时文件清理失败不会覆盖原始错误。
+            }
+        }
     }
 
     private static void EnsureMixedPortAvailable()
