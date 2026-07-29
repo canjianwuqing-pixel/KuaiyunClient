@@ -5,104 +5,107 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <StackPanel>
-            <TextBlock Text="节点" FontSize="28" FontWeight="Bold" />
-            <TextBlock Text="从账号订阅中读取真实线路，旗帜根据节点名称自动识别"
-                       Foreground="{StaticResource MutedTextBrush}"
-                       Margin="0,6,0,0" />
-        </StackPanel>
-
-        <Grid Grid.Row="1" Margin="0,22,0,10">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-                <Button x:Name="RefreshButton" Content="刷新订阅" Width="116"
-                        Style="{StaticResource PrimaryButtonStyle}"
-                        Click="RefreshButton_Click" />
-                <Button x:Name="DelayTestButton" Content="全部测速" Width="116"
-                        Margin="12,0,0,0" IsEnabled="False"
-                        Style="{StaticResource PrimaryButtonStyle}"
-                        Click="DelayTestButton_Click" />
-            </StackPanel>
-
-            <TextBlock x:Name="SummaryText" Text="0 个节点"
-                       Foreground="{StaticResource MutedTextBrush}"
-                       HorizontalAlignment="Right" VerticalAlignment="Center" />
+        <Grid Margin="0,2,0,14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="50" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="50" />
+            </Grid.ColumnDefinitions>
+            <Button Width="40" Height="40" Background="White" BorderThickness="0"
+                    Cursor="Hand" Click="BackButton_Click">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="20">
+                            <TextBlock Text="&#xE72B;" FontFamily="Segoe MDL2 Assets"
+                                       FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+            <TextBlock Grid.Column="1" Text="选择服务器" FontSize="20" FontWeight="Bold"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
         </Grid>
 
-        <TextBlock Grid.Row="2" x:Name="StatusText"
-                   Text="登录后自动下载订阅。"
+        <TextBlock Grid.Row="1" x:Name="StatusText"
+                   Visibility="Collapsed"
                    Foreground="{StaticResource MutedTextBrush}"
-                   TextWrapping="Wrap" Margin="0,0,0,12" />
+                   TextAlignment="Center" TextWrapping="Wrap"
+                   Margin="8,0,8,10" />
 
-        <Border Grid.Row="3" Style="{StaticResource CardStyle}" Padding="12">
+        <Border Grid.Row="2" Background="White" CornerRadius="18"
+                BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                Padding="10">
             <Grid>
-                <TextBlock x:Name="EmptyText"
-                           Text="尚未加载节点。登录并获取订阅后再显示真实节点。"
+                <TextBlock x:Name="EmptyText" Text="暂无可用线路"
                            Foreground="{StaticResource MutedTextBrush}"
-                           HorizontalAlignment="Center" VerticalAlignment="Center"
-                           TextAlignment="Center" TextWrapping="Wrap" />
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
 
-                <ListBox x:Name="NodesList" Visibility="Collapsed"
-                         BorderThickness="0" Background="Transparent"
+                <ListBox x:Name="NodesList"
+                         Visibility="Collapsed"
+                         BorderThickness="0"
+                         Background="Transparent"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                          SelectionChanged="NodesList_SelectionChanged">
                     <ListBox.ItemContainerStyle>
                         <Style TargetType="ListBoxItem">
                             <Setter Property="Padding" Value="0" />
-                            <Setter Property="Margin" Value="0,0,0,10" />
+                            <Setter Property="Margin" Value="0,0,0,8" />
                             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                            <Setter Property="BorderThickness" Value="0" />
+                            <Setter Property="Background" Value="#F3F6FA" />
+                            <Setter Property="BorderBrush" Value="Transparent" />
+                            <Setter Property="BorderThickness" Value="1" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <Border x:Name="ItemBorder"
+                                                Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                CornerRadius="14"
+                                                Padding="14">
+                                            <ContentPresenter />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="ItemBorder" Property="Background" Value="#EDF2F8" />
+                                            </Trigger>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource SelectedBrush}" />
+                                                <Setter TargetName="ItemBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
                         </Style>
                     </ListBox.ItemContainerStyle>
+
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Border Padding="14" CornerRadius="11"
-                                    BorderBrush="{StaticResource LineBrush}"
-                                    BorderThickness="1" Background="#FAFCFF">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="52" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="120" />
-                                    </Grid.ColumnDefinitions>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="48" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="74" />
+                                </Grid.ColumnDefinitions>
 
-                                    <TextBlock Text="{Binding CountryFlag}"
-                                               FontFamily="Segoe UI Emoji"
-                                               FontSize="28"
-                                               HorizontalAlignment="Center"
-                                               VerticalAlignment="Center" />
+                                <Border Width="40" Height="30" CornerRadius="5" ClipToBounds="True"
+                                        Background="White" BorderBrush="#DDE3EC" BorderThickness="1">
+                                    <Image Source="{Binding FlagImagePath}" Stretch="UniformToFill" />
+                                </Border>
 
-                                    <StackPanel Grid.Column="1" Margin="10,0,12,0">
-                                        <TextBlock Text="{Binding DisplayName}"
-                                                   FontWeight="SemiBold" FontSize="14"
-                                                   TextTrimming="CharacterEllipsis" />
-                                        <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
-                                            <TextBlock Text="{Binding CountryName}"
-                                                       Foreground="{StaticResource MutedTextBrush}"
-                                                       FontSize="11" />
-                                            <TextBlock Text="  ·  "
-                                                       Foreground="{StaticResource MutedTextBrush}"
-                                                       FontSize="11" />
-                                            <TextBlock Text="{Binding Type}"
-                                                       Foreground="{StaticResource MutedTextBrush}"
-                                                       FontSize="11" />
-                                        </StackPanel>
-                                        <TextBlock Text="{Binding Server}"
-                                                   Foreground="{StaticResource MutedTextBrush}"
-                                                   FontSize="10" Margin="0,4,0,0"
-                                                   TextTrimming="CharacterEllipsis" />
-                                    </StackPanel>
+                                <TextBlock Grid.Column="1" Text="{Binding DisplayName}"
+                                           FontSize="15" FontWeight="SemiBold"
+                                           Margin="10,0,8,0" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis" />
 
-                                    <TextBlock Grid.Column="2"
-                                               Text="{Binding DelayText}"
-                                               HorizontalAlignment="Right"
-                                               VerticalAlignment="Center"
-                                               Foreground="{StaticResource MutedTextBrush}" />
-                                </Grid>
-                            </Border>
+                                <TextBlock Grid.Column="2" Text="{Binding DelayText}"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           HorizontalAlignment="Right" VerticalAlignment="Center" />
+                            </Grid>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
