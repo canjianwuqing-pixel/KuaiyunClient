@@ -28,8 +28,8 @@ public partial class App : Application
         if (e.Args.Any(argument =>
                 string.Equals(argument, SelfTestArgument, StringComparison.OrdinalIgnoreCase)))
         {
-            ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            Shutdown(RunSelfTest());
+            // 自检会创建完整窗口对象，但不能走正常 Closing 事件，否则系统代理安全恢复逻辑会拦截退出。
+            Environment.Exit(RunSelfTest());
             return;
         }
 
