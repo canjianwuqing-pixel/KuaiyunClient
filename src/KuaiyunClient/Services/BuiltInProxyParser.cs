@@ -162,7 +162,7 @@ public static class BuiltInProxyParser
             serverUri.Port);
 
         string normalizedCredentials = ToUrlSafeBase64($"{method}:{password}");
-        string normalizedHost = serverUri.Host.Contains(':', StringComparison.Ordinal)
+        string normalizedHost = serverUri.Host.Contains(':')
             ? $"[{serverUri.Host}]"
             : serverUri.Host;
         string normalized = $"ss://{normalizedCredentials}@{normalizedHost}:{serverUri.Port}";
@@ -175,7 +175,7 @@ public static class BuiltInProxyParser
             serverUri.Port,
             Username: null,
             Password: null,
-            shadowsocks);
+            Shadowsocks: shadowsocks);
     }
 
     private static bool QueryContainsPlugin(string query)
@@ -191,7 +191,7 @@ public static class BuiltInProxyParser
     private static string DecodeBase64OrPlain(string value)
     {
         string text = value.Trim();
-        if (text.Contains(':', StringComparison.Ordinal))
+        if (text.Contains(':'))
         {
             return text;
         }
