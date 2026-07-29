@@ -1,5 +1,4 @@
 using KuaiyunClient.Models;
-using KuaiyunClient.Services;
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -10,9 +9,7 @@ public partial class NodesView : UserControl
 {
     private readonly ObservableCollection<ProxyNode> _nodes = [];
 
-    public event EventHandler? RefreshRequested;
-
-    public event EventHandler? DelayTestRequested;
+    public event EventHandler? BackRequested;
 
     public event EventHandler<ProxyNode>? NodeSelectionRequested;
 
@@ -22,27 +19,31 @@ public partial class NodesView : UserControl
         NodesList.ItemsSource = _nodes;
     }
 
-    public IReadOnlyList<ProxyNode> GetNodesSnapshot()
-    {
-        return _nodes.ToArray();
-    }
+    public IReadOnlyList<ProxyNode> GetNodesSnapshot() => _nodes.ToArray();
 
-    public void SetBusy(bool busy, string message)
+    public void SetBusy(bool busy, string? message = null)
     {
-        RefreshButton.IsEnabled = !busy;
-        DelayTestButton.IsEnabled = !busy && _nodes.Count > 0;
         NodesList.IsEnabled = !busy;
-        StatusText.Text = message;
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            StatusText.Visibility = Visibility.Collapsed;
+            StatusText.Text = string.Empty;
+        }
+        else
+        {
+            StatusText.Text = message;
+            StatusText.Visibility = Visibility.Visible;
+        }
     }
 
-    public void ShowStatus(string message)
+    public void ShowStatus(string? message)
     {
-        StatusText.Text = message;
+        SetBusy(false, message);
     }
 
     public void ShowDelayProgress(int completed, int total, int successCount)
     {
-        StatusText.Text = $"正在测速：{completed}/{total}，可用 {successCount} 个。";
+        SetBusy(true, $"正在检测线路 {completed}/{total}");
     }
 
     public void SetNodes(IEnumerable<ProxyNode> nodes)
@@ -56,37 +57,29 @@ public partial class NodesView : UserControl
         bool hasNodes = _nodes.Count > 0;
         EmptyText.Visibility = hasNodes ? Visibility.Collapsed : Visibility.Visible;
         NodesList.Visibility = hasNodes ? Visibility.Visible : Visibility.Collapsed;
-
-        int countryCount = _nodes
-            .Select(node => string.IsNullOrWhiteSpace(node.CountryCode)
-                ? node.CountryName
-                : node.CountryCode)
-            .Where(value => !string.IsNullOrWhiteSpace(value)
-                && !string.Equals(value, "其他地区", StringComparison.Ordinal))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Count();
-
-        SummaryText.Text = countryCount > 0
-            ? $"{_nodes.Count} 个节点 · 实际 {countryCount} 个国家/地区 · 图标库 {CountryFlagResolver.SupportedRegionCount}"
-            : $"{_nodes.Count} 个节点 · 图标库 {CountryFlagResolver.SupportedRegionCount}";
-
-        StatusText.Text = hasNodes
-            ? "订阅已加载。点击“全部测速”获取真实延迟。"
-            : "订阅中没有可显示的节点。";
-
-        RefreshButton.IsEnabled = true;
-        DelayTestButton.IsEnabled = hasNodes;
-        NodesList.IsEnabled = true;
+        SetBusy(false);
     }
 
-    private void RefreshButton_Click(object sender, RoutedEventArgs e)
+    public void SetSelectedNode(ProxyNode? node)
     {
-        RefreshRequested?.Invoke(this, EventArgs.Empty);
+        if (node is null)
+        {
+            NodesList.SelectedItem = null;
+            return;
+        }
+
+        ProxyNode? match = _nodes.FirstOrDefault(item =>
+            string.Equals(item.Name, node.Name, StringComparison.Ordinal));
+        NodesList.SelectedItem = match;
+        if (match is not null)
+        {
+            NodesList.ScrollIntoView(match);
+        }
     }
 
-    private void DelayTestButton_Click(object sender, RoutedEventArgs e)
+    private void BackButton_Click(object sender, RoutedEventArgs e)
     {
-        DelayTestRequested?.Invoke(this, EventArgs.Empty);
+        BackRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void NodesList_SelectionChanged(object sender, SelectionChangedEventArgs e)
