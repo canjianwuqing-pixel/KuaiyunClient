@@ -8,24 +8,70 @@
             <Border Style="{StaticResource CardStyle}">
                 <StackPanel>
                     <TextBlock Text="当前套餐" Foreground="{StaticResource MutedTextBrush}" FontSize="12" />
-                    <TextBlock x:Name="CurrentPlanText" Text="当前套餐"
+                    <TextBlock x:Name="CurrentPlanText" Text="未订阅套餐"
                                FontSize="22" FontWeight="Bold" Margin="0,7,0,0" />
                     <TextBlock x:Name="PlanExpiryText" Text="到期时间 --"
                                Foreground="{StaticResource MutedTextBrush}" Margin="0,8,0,0" />
                 </StackPanel>
             </Border>
 
-            <Border Style="{StaticResource CardStyle}" Margin="0,12,0,0">
-                <StackPanel>
-                    <TextBlock Text="选择适合你的套餐" FontSize="18" FontWeight="Bold" />
-                    <TextBlock Text="在官方购买页面查看套餐、续费或升级。"
-                               Foreground="{StaticResource MutedTextBrush}"
-                               TextWrapping="Wrap" Margin="0,8,0,18" />
-                    <Button Content="进入购买页面"
-                            Style="{StaticResource RoundedButtonStyle}"
-                            Click="PurchaseButton_Click" />
-                </StackPanel>
-            </Border>
+            <TextBlock Text="选择适合你的套餐" FontSize="18" FontWeight="Bold" Margin="4,18,0,0" />
+            <TextBlock Text="套餐名称、价格、流量和周期均实时读取后台。"
+                       Foreground="{StaticResource MutedTextBrush}"
+                       TextWrapping="Wrap" Margin="4,7,0,12" />
+
+            <TextBlock x:Name="StatusText"
+                       Text="正在读取套餐..."
+                       Foreground="{StaticResource MutedTextBrush}"
+                       TextAlignment="Center"
+                       TextWrapping="Wrap"
+                       Margin="8,20" />
+
+            <ItemsControl x:Name="PlansItems" Visibility="Collapsed">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Name}"
+                                               FontSize="20" FontWeight="Bold"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <Border Grid.Column="1" Background="#E8F9F6" CornerRadius="10"
+                                            Padding="9,4" Margin="10,0,0,0">
+                                        <TextBlock Text="{Binding TrafficText}"
+                                                   Foreground="{StaticResource AccentDarkBrush}"
+                                                   FontSize="11" />
+                                    </Border>
+                                </Grid>
+
+                                <TextBlock Text="{Binding DescriptionText}"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           TextWrapping="Wrap" Margin="0,10,0,14"
+                                           MaxHeight="54" />
+
+                                <ComboBox x:Name="CyclePicker"
+                                          ItemsSource="{Binding Cycles}"
+                                          DisplayMemberPath="DisplayText"
+                                          SelectedIndex="0"
+                                          Height="42" Padding="10,6"
+                                          Background="#F5F7FA"
+                                          BorderBrush="{StaticResource LineBrush}" />
+
+                                <Button Content="立即购买"
+                                        Tag="{Binding}"
+                                        CommandParameter="{Binding SelectedItem, ElementName=CyclePicker}"
+                                        Style="{StaticResource RoundedButtonStyle}"
+                                        Margin="0,12,0,0"
+                                        Click="PurchaseButton_Click" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
         </StackPanel>
     </ScrollViewer>
 </UserControl>
