@@ -1,39 +1,151 @@
 <UserControl x:Class="KuaiyunClient.Views.LoginView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <Grid>
-        <StackPanel VerticalAlignment="Center" Margin="18">
-            <Border Width="64" Height="64" CornerRadius="20"
-                    Background="{StaticResource AccentBrush}"
-                    HorizontalAlignment="Center">
-                <TextBlock Text="K" Foreground="White" FontSize="30" FontWeight="Bold"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-            </Border>
-            <TextBlock Text="快云加速" FontSize="28" FontWeight="Bold"
-                       HorizontalAlignment="Center" Margin="0,14,0,0" />
-            <TextBlock Text="登录后开始使用"
-                       Foreground="{StaticResource MutedTextBrush}"
-                       HorizontalAlignment="Center" Margin="0,6,0,22" />
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <Grid Margin="18,20,18,24">
+            <StackPanel VerticalAlignment="Center">
+                <Border Width="64" Height="64" CornerRadius="20"
+                        Background="{StaticResource AccentBrush}"
+                        HorizontalAlignment="Center">
+                    <TextBlock Text="K" Foreground="White" FontSize="30" FontWeight="Bold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="快云加速" FontSize="28" FontWeight="Bold"
+                           HorizontalAlignment="Center" Margin="0,14,0,0" />
+                <TextBlock x:Name="PageHintText" Text="登录后开始使用"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           HorizontalAlignment="Center" Margin="0,6,0,18" />
 
-            <Border Style="{StaticResource CardStyle}" Padding="22">
-                <StackPanel>
-                    <TextBlock Text="邮箱账号" FontWeight="SemiBold" Margin="2,0,0,8" />
-                    <TextBox x:Name="EmailInput" Height="46" Padding="12,9"
-                             Background="#F5F7FA" BorderBrush="{StaticResource LineBrush}" />
+                <Border Style="{StaticResource CardStyle}" Padding="22">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,20">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition />
+                                <ColumnDefinition />
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="LoginModeButton" Grid.Column="0" Content="登录"
+                                    Tag="Login" Height="40" Margin="0,0,5,0"
+                                    Style="{StaticResource RoundedButtonStyle}"
+                                    Click="ModeButton_Click" />
+                            <Button x:Name="RegisterModeButton" Grid.Column="1" Content="注册"
+                                    Tag="Register" Height="40" Margin="5,0,0,0"
+                                    Background="#EEF2F8" Foreground="#536176"
+                                    Style="{StaticResource RoundedButtonStyle}"
+                                    Click="ModeButton_Click" />
+                        </Grid>
 
-                    <TextBlock Text="登录密码" FontWeight="SemiBold" Margin="2,18,0,8" />
-                    <PasswordBox x:Name="PasswordInput" Height="46" Padding="12,9"
-                                 Background="#F5F7FA" BorderBrush="{StaticResource LineBrush}" />
+                        <StackPanel x:Name="LoginPanel">
+                            <TextBlock Text="邮箱账号" FontWeight="SemiBold" Margin="2,0,0,8" />
+                            <TextBox x:Name="EmailInput" Height="46" Padding="12,9"
+                                     Background="#F5F7FA" BorderBrush="{StaticResource LineBrush}" />
 
-                    <Button x:Name="LoginButton" Content="登录"
-                            Style="{StaticResource RoundedButtonStyle}"
-                            Margin="0,22,0,0" Click="LoginButton_Click" />
+                            <TextBlock Text="登录密码" FontWeight="SemiBold" Margin="2,18,0,8" />
+                            <PasswordBox x:Name="PasswordInput" Height="46" Padding="12,9"
+                                         Background="#F5F7FA" BorderBrush="{StaticResource LineBrush}" />
 
-                    <TextBlock x:Name="StatusText" Text=""
-                               Foreground="{StaticResource MutedTextBrush}"
-                               TextAlignment="Center" TextWrapping="Wrap" Margin="0,14,0,0" />
-                </StackPanel>
-            </Border>
-        </StackPanel>
-    </Grid>
+                            <Grid Margin="0,14,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal">
+                                    <CheckBox x:Name="RememberAccountCheckBox" Content="记住账号"
+                                              VerticalAlignment="Center" />
+                                    <CheckBox x:Name="AutoLoginCheckBox" Content="自动登录"
+                                              Margin="18,0,0,0" VerticalAlignment="Center"
+                                              Checked="AutoLoginCheckBox_Checked" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="忘记密码"
+                                        Background="Transparent" BorderThickness="0"
+                                        Foreground="{StaticResource AccentDarkBrush}"
+                                        Cursor="Hand" Padding="4"
+                                        Click="ForgotPasswordButton_Click" />
+                            </Grid>
+
+                            <Button x:Name="LoginButton" Content="登录"
+                                    Style="{StaticResource RoundedButtonStyle}"
+                                    Margin="0,22,0,0" Click="LoginButton_Click" />
+                        </StackPanel>
+
+                        <StackPanel x:Name="RegisterPanel" Visibility="Collapsed">
+                            <TextBlock Text="邮箱账号" FontWeight="SemiBold" Margin="2,0,0,8" />
+                            <TextBox x:Name="RegisterEmailInput" Height="44" Padding="12,8"
+                                     Background="#F5F7FA" BorderBrush="{StaticResource LineBrush}" />
+
+                            <TextBlock Text="邮箱验证码" FontWeight="SemiBold" Margin="2,14,0,8" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition />
+                                    <ColumnDefinition Width="118" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="RegisterCodeInput" Height="44" Padding="12,8"
+                                         Background="#F5F7FA" BorderBrush="{StaticResource LineBrush}" />
+                                <Button x:Name="RegisterCodeButton" Grid.Column="1" Content="获取验证码"
+                                        Tag="Register" Margin="8,0,0,0" Height="44"
+                                        Style="{StaticResource RoundedButtonStyle}"
+                                        Click="VerificationButton_Click" />
+                            </Grid>
+
+                            <TextBlock Text="设置密码" FontWeight="SemiBold" Margin="2,14,0,8" />
+                            <PasswordBox x:Name="RegisterPasswordInput" Height="44" Padding="12,8"
+                                         Background="#F5F7FA" BorderBrush="{StaticResource LineBrush}" />
+
+                            <TextBlock Text="确认密码" FontWeight="SemiBold" Margin="2,14,0,8" />
+                            <PasswordBox x:Name="RegisterConfirmPasswordInput" Height="44" Padding="12,8"
+                                         Background="#F5F7FA" BorderBrush="{StaticResource LineBrush}" />
+
+                            <TextBlock Text="邀请码（选填）" FontWeight="SemiBold" Margin="2,14,0,8" />
+                            <TextBox x:Name="InviteCodeInput" Height="44" Padding="12,8"
+                                     Background="#F5F7FA" BorderBrush="{StaticResource LineBrush}" />
+
+                            <Button x:Name="RegisterButton" Content="注册"
+                                    Style="{StaticResource RoundedButtonStyle}"
+                                    Margin="0,22,0,0" Click="RegisterButton_Click" />
+                        </StackPanel>
+
+                        <StackPanel x:Name="ForgotPanel" Visibility="Collapsed">
+                            <Button Content="← 返回登录" HorizontalAlignment="Left"
+                                    Background="Transparent" BorderThickness="0" Padding="0,0,0,12"
+                                    Foreground="{StaticResource AccentDarkBrush}" Cursor="Hand"
+                                    Click="BackToLoginButton_Click" />
+
+                            <TextBlock Text="邮箱账号" FontWeight="SemiBold" Margin="2,0,0,8" />
+                            <TextBox x:Name="ResetEmailInput" Height="44" Padding="12,8"
+                                     Background="#F5F7FA" BorderBrush="{StaticResource LineBrush}" />
+
+                            <TextBlock Text="邮箱验证码" FontWeight="SemiBold" Margin="2,14,0,8" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition />
+                                    <ColumnDefinition Width="118" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="ResetCodeInput" Height="44" Padding="12,8"
+                                         Background="#F5F7FA" BorderBrush="{StaticResource LineBrush}" />
+                                <Button x:Name="ResetCodeButton" Grid.Column="1" Content="获取验证码"
+                                        Tag="Reset" Margin="8,0,0,0" Height="44"
+                                        Style="{StaticResource RoundedButtonStyle}"
+                                        Click="VerificationButton_Click" />
+                            </Grid>
+
+                            <TextBlock Text="新密码" FontWeight="SemiBold" Margin="2,14,0,8" />
+                            <PasswordBox x:Name="ResetPasswordInput" Height="44" Padding="12,8"
+                                         Background="#F5F7FA" BorderBrush="{StaticResource LineBrush}" />
+
+                            <TextBlock Text="确认新密码" FontWeight="SemiBold" Margin="2,14,0,8" />
+                            <PasswordBox x:Name="ResetConfirmPasswordInput" Height="44" Padding="12,8"
+                                         Background="#F5F7FA" BorderBrush="{StaticResource LineBrush}" />
+
+                            <Button x:Name="ResetPasswordButton" Content="重置密码"
+                                    Style="{StaticResource RoundedButtonStyle}"
+                                    Margin="0,22,0,0" Click="ResetPasswordButton_Click" />
+                        </StackPanel>
+
+                        <TextBlock x:Name="StatusText" Text=""
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   TextAlignment="Center" TextWrapping="Wrap" Margin="0,14,0,0" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
 </UserControl>
