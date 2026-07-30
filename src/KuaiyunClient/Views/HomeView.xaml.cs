@@ -1,4 +1,5 @@
 using KuaiyunClient.Models;
+using KuaiyunClient.Services;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -8,7 +9,11 @@ namespace KuaiyunClient.Views;
 
 public partial class HomeView : UserControl
 {
+    private readonly V2BoardCommerceApi _commerceApi = new();
     private ProxyNode? _currentNode;
+    private UserSession? _session;
+    private IReadOnlyList<V2BoardNotice> _notices = [];
+    private int _accountLoadVersion;
 
     public event EventHandler? ConnectionToggleRequested;
 
@@ -23,25 +28,10 @@ public partial class HomeView : UserControl
 
     public void ShowSession(UserSession session)
     {
-        double used = session.UploadBytes + session.DownloadBytes;
-        double remaining = Math.Max(0, session.TransferEnableBytes - used);
-
-        TrafficText.Text = session.TransferEnableBytes > 0
-            ? $"{ToGigabytes(remaining):F1} GB"
-            : "--";
-        TotalTrafficText.Text = session.TransferEnableBytes > 0
-            ? $"总流量 {ToGigabytes(session.TransferEnableBytes):F0} GB"
-            : "总流量 --";
-        ExpiryText.Text = session.ExpiredAt > 0
-            ? "到期时间 " + DateTimeOffset
-                .FromUnixTimeSeconds(session.ExpiredAt)
-                .LocalDateTime
-                .ToString("yyyy-MM-dd")
-            : "到期时间 --";
-        PlanText.Text = string.IsNullOrWhiteSpace(session.PlanName)
-            ? "未订阅套餐"
-            : session.PlanName;
-        ResetText.Text = BuildResetText(session.ResetDay);
+        _session = session;
+        RenderSession(session);
+        int version = ++_accountLoadVersion;
+        _ = RefreshAccountAsync(session, version);
     }
 
     public void SetAnnouncement(string? announcement)
@@ -97,6 +87,72 @@ public partial class HomeView : UserControl
             MessageBoxImage.Warning);
     }
 
+    private async Task RefreshAccountAsync(UserSession session, int version)
+    {
+        AppConfig? config = BuildApiConfig(session);
+        if (config is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _commerceApi.RefreshSessionAsync(config, session);
+            IReadOnlyList<V2BoardPlan> plans = await _commerceApi.GetPlansAsync(config, session);
+            V2BoardPlan? currentPlan = session.PlanId is int planId
+                ? plans.FirstOrDefault(plan => plan.Id == planId)
+                : null;
+            session.PlanName = currentPlan?.Name ?? "未订阅套餐";
+
+            try
+            {
+                _notices = await _commerceApi.GetNoticesAsync(config, session);
+            }
+            catch
+            {
+                _notices = [];
+            }
+
+            if (version != _accountLoadVersion || !ReferenceEquals(session, _session))
+            {
+                return;
+            }
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                RenderSession(session);
+                SetAnnouncement(_notices.FirstOrDefault()?.Title);
+            });
+        }
+        catch
+        {
+            // 账户扩展信息读取失败不影响订阅连接。
+        }
+    }
+
+    private void RenderSession(UserSession session)
+    {
+        double used = session.UploadBytes + session.DownloadBytes;
+        double remaining = Math.Max(0, session.TransferEnableBytes - used);
+
+        TrafficText.Text = session.TransferEnableBytes > 0
+            ? $"{ToGigabytes(remaining):F1} GB"
+            : "--";
+        TotalTrafficText.Text = session.TransferEnableBytes > 0
+            ? $"总流量 {ToGigabytes(session.TransferEnableBytes):F0} GB"
+            : "总流量 --";
+        ExpiryText.Text = session.ExpiredAt > 0
+            ? "到期时间 " + DateTimeOffset
+                .FromUnixTimeSeconds(session.ExpiredAt)
+                .LocalDateTime
+                .ToString("yyyy-MM-dd")
+            : "到期时间 --";
+        PlanText.Text = string.IsNullOrWhiteSpace(session.PlanName)
+            ? "未订阅套餐"
+            : session.PlanName;
+        ResetText.Text = BuildResetText(session.ResetDay);
+    }
+
     private void ConnectionButton_Click(object sender, RoutedEventArgs e)
     {
         ConnectionToggleRequested?.Invoke(this, EventArgs.Empty);
@@ -109,7 +165,36 @@ public partial class HomeView : UserControl
 
     private void AnnouncementButton_Click(object sender, RoutedEventArgs e)
     {
-        AnnouncementRequested?.Invoke(this, EventArgs.Empty);
+        V2BoardNotice? notice = _notices.FirstOrDefault();
+        if (notice is null)
+        {
+            AnnouncementRequested?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        MessageBox.Show(
+            string.IsNullOrWhiteSpace(notice.PlainContent)
+                ? "暂无详细内容。"
+                : notice.PlainContent,
+            notice.Title,
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+    }
+
+    private static AppConfig? BuildApiConfig(UserSession session)
+    {
+        if (!Uri.TryCreate(session.SubscriptionUrl, UriKind.Absolute, out Uri? uri))
+        {
+            return null;
+        }
+
+        string host = uri.GetLeftPart(UriPartial.Authority);
+        session.ApiHost = host;
+        return new AppConfig
+        {
+            UserAgent = "kuaiyun",
+            RemoteHosts = [host]
+        };
     }
 
     private static string BuildResetText(int? resetDay)
