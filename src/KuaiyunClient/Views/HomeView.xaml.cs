@@ -38,7 +38,10 @@ public partial class HomeView : UserControl
                 .LocalDateTime
                 .ToString("yyyy-MM-dd")
             : "到期时间 --";
-        PlanText.Text = "当前套餐";
+        PlanText.Text = string.IsNullOrWhiteSpace(session.PlanName)
+            ? "未订阅套餐"
+            : session.PlanName;
+        ResetText.Text = BuildResetText(session.ResetDay);
     }
 
     public void SetAnnouncement(string? announcement)
@@ -107,6 +110,30 @@ public partial class HomeView : UserControl
     private void AnnouncementButton_Click(object sender, RoutedEventArgs e)
     {
         AnnouncementRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static string BuildResetText(int? resetDay)
+    {
+        if (resetDay is not > 0)
+        {
+            return "流量重置 --";
+        }
+
+        DateTime today = DateTime.Today;
+        DateTime candidate = CreateSafeDate(today.Year, today.Month, resetDay.Value);
+        if (candidate < today)
+        {
+            DateTime nextMonth = today.AddMonths(1);
+            candidate = CreateSafeDate(nextMonth.Year, nextMonth.Month, resetDay.Value);
+        }
+
+        int days = Math.Max(0, (candidate - today).Days);
+        return $"下次重置 {candidate:MM-dd}（{days} 天）";
+    }
+
+    private static DateTime CreateSafeDate(int year, int month, int day)
+    {
+        return new DateTime(year, month, Math.Min(day, DateTime.DaysInMonth(year, month)));
     }
 
     private static double ToGigabytes(double bytes) => bytes / 1024d / 1024d / 1024d;
