@@ -10,6 +10,27 @@ public interface IV2BoardApi
         string password,
         CancellationToken cancellationToken = default);
 
+    Task SendEmailVerificationAsync(
+        AppConfig config,
+        string email,
+        bool forPasswordReset,
+        CancellationToken cancellationToken = default);
+
+    Task<UserSession> RegisterAsync(
+        AppConfig config,
+        string email,
+        string emailCode,
+        string password,
+        string? inviteCode,
+        CancellationToken cancellationToken = default);
+
+    Task ResetPasswordAsync(
+        AppConfig config,
+        string email,
+        string emailCode,
+        string password,
+        CancellationToken cancellationToken = default);
+
     Task<string> DownloadSubscriptionAsync(
         AppConfig config,
         UserSession session,
