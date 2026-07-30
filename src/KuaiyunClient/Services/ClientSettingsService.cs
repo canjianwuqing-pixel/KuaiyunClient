@@ -63,12 +63,12 @@ public sealed class ClientSettingsService
 }
 
 public sealed record ClientSettings(
-    bool StartWithWindows,
-    bool AutoConnect,
-    bool UseSystemProxy)
+    bool StartWithWindows = false,
+    bool AutoConnect = false,
+    bool UseSystemProxy = true,
+    bool RememberAccount = false,
+    bool AutoLogin = false,
+    string? SavedEmail = null)
 {
-    public static ClientSettings Default { get; } = new(
-        StartWithWindows: false,
-        AutoConnect: false,
-        UseSystemProxy: true);
+    public static ClientSettings Default { get; } = new();
 }
