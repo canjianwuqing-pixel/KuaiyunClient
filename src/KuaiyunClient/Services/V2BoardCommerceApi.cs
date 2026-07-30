@@ -19,10 +19,7 @@ public sealed class V2BoardCommerceApi : IDisposable
     public V2BoardCommerceApi(HttpClient? httpClient = null)
     {
         _ownsHttpClient = httpClient is null;
-        _httpClient = httpClient ?? new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(20)
-        };
+        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
     }
 
     public async Task RefreshSessionAsync(
@@ -31,22 +28,17 @@ public sealed class V2BoardCommerceApi : IDisposable
         CancellationToken cancellationToken = default)
     {
         JsonElement root = await SendAcrossHostsAsync(
-            config,
-            session,
-            HttpMethod.Get,
-            ["/user/getSubscribe"],
-            payload: null,
-            cancellationToken);
+            config, session, HttpMethod.Get, ["/user/getSubscribe"], null, cancellationToken);
         JsonElement data = RequireObject(root, "data", "账户信息响应缺少 data。");
 
-        session.Email = TryGetString(data, "email") ?? session.Email;
-        session.SubscriptionUrl = TryGetString(data, "subscribe_url") ?? session.SubscriptionUrl;
-        session.UploadBytes = TryGetInt64(data, "u");
-        session.DownloadBytes = TryGetInt64(data, "d");
-        session.TransferEnableBytes = TryGetInt64(data, "transfer_enable");
-        session.ExpiredAt = TryGetInt64(data, "expired_at");
-        session.PlanId = TryGetNullableInt32(data, "plan_id");
-        session.ResetDay = TryGetNullableInt32(data, "reset_day");
+        session.Email = GetString(data, "email") ?? session.Email;
+        session.SubscriptionUrl = GetString(data, "subscribe_url") ?? session.SubscriptionUrl;
+        session.UploadBytes = GetInt64(data, "u");
+        session.DownloadBytes = GetInt64(data, "d");
+        session.TransferEnableBytes = GetInt64(data, "transfer_enable");
+        session.ExpiredAt = GetInt64(data, "expired_at");
+        session.PlanId = GetNullableInt32(data, "plan_id");
+        session.ResetDay = GetNullableInt32(data, "reset_day");
     }
 
     public async Task<IReadOnlyList<V2BoardPlan>> GetPlansAsync(
@@ -59,13 +51,13 @@ public sealed class V2BoardCommerceApi : IDisposable
             session,
             HttpMethod.Get,
             ["/user/plan/fetch", "/guest/plan/fetch"],
-            payload: null,
+            null,
             cancellationToken);
         JsonElement data = RequireArray(root, "data", "套餐响应缺少 data。");
 
         return data.EnumerateArray()
             .Where(item => item.ValueKind == JsonValueKind.Object)
-            .Where(item => TryGetInt32(item, "show", 1) != 0)
+            .Where(item => GetInt32(item, "show", 1) != 0)
             .Select(ParsePlan)
             .Where(plan => plan.Id > 0 && plan.Cycles.Count > 0)
             .OrderBy(plan => plan.Sort)
@@ -79,24 +71,19 @@ public sealed class V2BoardCommerceApi : IDisposable
         CancellationToken cancellationToken = default)
     {
         JsonElement root = await SendAcrossHostsAsync(
-            config,
-            session,
-            HttpMethod.Get,
-            ["/user/notice/fetch"],
-            payload: null,
-            cancellationToken);
+            config, session, HttpMethod.Get, ["/user/notice/fetch"], null, cancellationToken);
         JsonElement data = RequireArray(root, "data", "公告响应缺少 data。");
 
         return data.EnumerateArray()
             .Where(item => item.ValueKind == JsonValueKind.Object)
             .Select(item => new V2BoardNotice
             {
-                Id = TryGetInt32(item, "id"),
-                Title = TryGetString(item, "title") ?? "系统公告",
-                Content = TryGetString(item, "content") ?? string.Empty,
-                CreatedAt = TryGetInt64(item, "created_at")
+                Id = GetInt32(item, "id"),
+                Title = GetString(item, "title") ?? "系统公告",
+                Content = GetString(item, "content") ?? string.Empty,
+                CreatedAt = GetInt64(item, "created_at")
             })
-            .OrderByDescending(notice => notice.CreatedAt)
+            .OrderByDescending(item => item.CreatedAt)
             .ToArray();
     }
 
@@ -104,7 +91,7 @@ public sealed class V2BoardCommerceApi : IDisposable
         AppConfig config,
         UserSession session,
         int planId,
-        string cycle,
+        string period,
         CancellationToken cancellationToken = default)
     {
         if (planId <= 0)
@@ -112,9 +99,9 @@ public sealed class V2BoardCommerceApi : IDisposable
             throw new ArgumentOutOfRangeException(nameof(planId));
         }
 
-        if (string.IsNullOrWhiteSpace(cycle))
+        if (string.IsNullOrWhiteSpace(period))
         {
-            throw new ArgumentException("套餐周期不能为空。", nameof(cycle));
+            throw new ArgumentException("套餐周期不能为空。", nameof(period));
         }
 
         JsonElement root = await SendAcrossHostsAsync(
@@ -122,7 +109,7 @@ public sealed class V2BoardCommerceApi : IDisposable
             session,
             HttpMethod.Post,
             ["/user/order/save"],
-            new { plan_id = planId, cycle },
+            new { plan_id = planId, period },
             cancellationToken);
         return RequireString(root, "data", "创建订单成功，但后台未返回订单号。");
     }
@@ -137,7 +124,7 @@ public sealed class V2BoardCommerceApi : IDisposable
             session,
             HttpMethod.Get,
             ["/user/order/getPaymentMethod"],
-            payload: null,
+            null,
             cancellationToken);
         JsonElement data = RequireArray(root, "data", "支付方式响应缺少 data。");
 
@@ -145,11 +132,11 @@ public sealed class V2BoardCommerceApi : IDisposable
             .Where(item => item.ValueKind == JsonValueKind.Object)
             .Select(item => new V2BoardPaymentMethod
             {
-                Id = TryGetInt32(item, "id"),
-                Name = TryGetString(item, "name") ?? "在线支付",
-                Payment = TryGetString(item, "payment") ?? string.Empty
+                Id = GetInt32(item, "id"),
+                Name = GetString(item, "name") ?? "在线支付",
+                Payment = GetString(item, "payment") ?? string.Empty
             })
-            .Where(method => method.Id > 0)
+            .Where(item => item.Id > 0)
             .ToArray();
     }
 
@@ -178,20 +165,25 @@ public sealed class V2BoardCommerceApi : IDisposable
             new { trade_no = tradeNo, method = paymentMethodId },
             cancellationToken);
 
-        JsonElement checkout = root;
+        JsonElement payload = root;
         if (root.TryGetProperty("data", out JsonElement wrapped)
             && wrapped.ValueKind == JsonValueKind.Object)
         {
-            checkout = wrapped;
+            payload = wrapped;
         }
 
-        int type = TryGetInt32(checkout, "type");
-        string? data = TryGetString(checkout, "data");
+        int type = GetInt32(payload, "type", GetInt32(root, "type"));
+        string? data = GetString(payload, "data");
         if (string.IsNullOrWhiteSpace(data)
-            && root.TryGetProperty("data", out JsonElement directData)
-            && directData.ValueKind == JsonValueKind.String)
+            && root.TryGetProperty("data", out JsonElement directData))
         {
-            data = directData.GetString();
+            data = directData.ValueKind switch
+            {
+                JsonValueKind.String => directData.GetString(),
+                JsonValueKind.True => "支付成功",
+                JsonValueKind.Number => directData.GetRawText(),
+                _ => null
+            };
         }
 
         if (string.IsNullOrWhiteSpace(data))
@@ -207,27 +199,32 @@ public sealed class V2BoardCommerceApi : IDisposable
         UserSession session,
         HttpMethod method,
         IReadOnlyList<string> relativePaths,
-        object? payload,
+        object? body,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(session);
 
         List<string> errors = [];
-        foreach (string host in GetOrderedHosts(config, session))
+        foreach (string host in OrderedHosts(config, session))
         {
             foreach (string relativePath in relativePaths)
             {
+                Uri uri;
+                try
+                {
+                    uri = BuildApiUri(host, relativePath);
+                }
+                catch (Exception ex) when (ex is UriFormatException or ArgumentException)
+                {
+                    errors.Add($"{host}{relativePath}: 后台地址无效：{ex.Message}");
+                    continue;
+                }
+
                 try
                 {
                     JsonElement result = await SendJsonAsync(
-                        config,
-                        session,
-                        host,
-                        method,
-                        relativePath,
-                        payload,
-                        cancellationToken);
+                        config, session, uri, method, body, cancellationToken);
                     session.ApiHost = host;
                     return result;
                 }
@@ -237,7 +234,7 @@ public sealed class V2BoardCommerceApi : IDisposable
                 }
                 catch (Exception ex) when (IsRecoverable(ex, cancellationToken))
                 {
-                    errors.Add($"{host}{relativePath}: {ex.Message}");
+                    errors.Add($"{uri}: {ex.Message}");
                 }
             }
         }
@@ -251,13 +248,11 @@ public sealed class V2BoardCommerceApi : IDisposable
     private async Task<JsonElement> SendJsonAsync(
         AppConfig config,
         UserSession session,
-        string host,
+        Uri uri,
         HttpMethod method,
-        string relativePath,
-        object? payload,
+        object? body,
         CancellationToken cancellationToken)
     {
-        Uri uri = BuildApiUri(host, relativePath);
         using HttpRequestMessage request = new(method, uri);
         request.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
         request.Headers.TryAddWithoutValidation(
@@ -265,19 +260,21 @@ public sealed class V2BoardCommerceApi : IDisposable
             string.IsNullOrWhiteSpace(config.UserAgent) ? "kuaiyun" : config.UserAgent.Trim());
         request.Headers.TryAddWithoutValidation("Authorization", session.AuthData);
 
-        if (payload is not null)
+        if (body is not null)
         {
             request.Content = new StringContent(
-                JsonSerializer.Serialize(payload, JsonOptions),
+                JsonSerializer.Serialize(body, JsonOptions),
                 Encoding.UTF8,
                 "application/json");
         }
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
-        string body = await response.Content.ReadAsStringAsync(cancellationToken);
+        string responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            string message = ReadApiMessage(body, $"请求失败（HTTP {(int)response.StatusCode}）");
+            string message = ReadApiMessage(
+                responseBody,
+                $"请求失败（HTTP {(int)response.StatusCode}）");
             if ((int)response.StatusCode is 401 or 403)
             {
                 throw new V2BoardAuthenticationException(
@@ -287,45 +284,47 @@ public sealed class V2BoardCommerceApi : IDisposable
             throw new V2BoardApiException(message);
         }
 
-        if (string.IsNullOrWhiteSpace(body))
+        if (string.IsNullOrWhiteSpace(responseBody))
         {
             throw new V2BoardApiException("后台返回了空响应。");
         }
 
-        using JsonDocument document = JsonDocument.Parse(body);
-        return document.RootElement.Clone();
-    }
-
-    private static V2BoardPlan ParsePlan(JsonElement item)
-    {
-        return new V2BoardPlan
+        try
         {
-            Id = TryGetInt32(item, "id"),
-            Name = TryGetString(item, "name") ?? "未命名套餐",
-            TransferEnableGigabytes = TryGetInt64(item, "transfer_enable"),
-            Content = TryGetString(item, "content") ?? string.Empty,
-            Renew = TryGetInt32(item, "renew", 1) != 0,
-            Sort = TryGetInt32(item, "sort"),
-            MonthPrice = TryGetNullableInt64(item, "month_price"),
-            QuarterPrice = TryGetNullableInt64(item, "quarter_price"),
-            HalfYearPrice = TryGetNullableInt64(item, "half_year_price"),
-            YearPrice = TryGetNullableInt64(item, "year_price"),
-            TwoYearPrice = TryGetNullableInt64(item, "two_year_price"),
-            ThreeYearPrice = TryGetNullableInt64(item, "three_year_price"),
-            OnetimePrice = TryGetNullableInt64(item, "onetime_price")
-        };
+            using JsonDocument document = JsonDocument.Parse(responseBody);
+            return document.RootElement.Clone();
+        }
+        catch (JsonException ex)
+        {
+            throw new V2BoardApiException("后台返回的内容不是有效 JSON：" + ex.Message);
+        }
     }
 
-    private static IEnumerable<string> GetOrderedHosts(AppConfig config, UserSession session)
+    private static V2BoardPlan ParsePlan(JsonElement item) => new()
     {
-        return config.RemoteHosts
+        Id = GetInt32(item, "id"),
+        Name = GetString(item, "name") ?? "未命名套餐",
+        TransferEnableGigabytes = GetInt64(item, "transfer_enable"),
+        Content = GetString(item, "content") ?? string.Empty,
+        Renew = GetInt32(item, "renew", 1) != 0,
+        Sort = GetInt32(item, "sort"),
+        MonthPrice = GetNullableInt64(item, "month_price"),
+        QuarterPrice = GetNullableInt64(item, "quarter_price"),
+        HalfYearPrice = GetNullableInt64(item, "half_year_price"),
+        YearPrice = GetNullableInt64(item, "year_price"),
+        TwoYearPrice = GetNullableInt64(item, "two_year_price"),
+        ThreeYearPrice = GetNullableInt64(item, "three_year_price"),
+        OnetimePrice = GetNullableInt64(item, "onetime_price")
+    };
+
+    private static IEnumerable<string> OrderedHosts(AppConfig config, UserSession session) =>
+        config.RemoteHosts
             .Where(host => !string.IsNullOrWhiteSpace(host))
             .OrderByDescending(host => string.Equals(
                 host.TrimEnd('/'),
                 session.ApiHost.TrimEnd('/'),
                 StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase);
-    }
 
     private static Uri BuildApiUri(string host, string relativePath)
     {
@@ -336,50 +335,50 @@ public sealed class V2BoardCommerceApi : IDisposable
     }
 
     private static JsonElement RequireObject(
-        JsonElement parent,
-        string propertyName,
-        string errorMessage)
+        JsonElement root,
+        string name,
+        string fallback)
     {
-        if (!parent.TryGetProperty(propertyName, out JsonElement value)
+        if (!root.TryGetProperty(name, out JsonElement value)
             || value.ValueKind != JsonValueKind.Object)
         {
-            throw new V2BoardApiException(ReadApiMessage(parent, errorMessage));
+            throw new V2BoardApiException(ReadApiMessage(root, fallback));
         }
 
         return value;
     }
 
     private static JsonElement RequireArray(
-        JsonElement parent,
-        string propertyName,
-        string errorMessage)
+        JsonElement root,
+        string name,
+        string fallback)
     {
-        if (!parent.TryGetProperty(propertyName, out JsonElement value)
+        if (!root.TryGetProperty(name, out JsonElement value)
             || value.ValueKind != JsonValueKind.Array)
         {
-            throw new V2BoardApiException(ReadApiMessage(parent, errorMessage));
+            throw new V2BoardApiException(ReadApiMessage(root, fallback));
         }
 
         return value;
     }
 
     private static string RequireString(
-        JsonElement parent,
-        string propertyName,
-        string errorMessage)
+        JsonElement root,
+        string name,
+        string fallback)
     {
-        string? value = TryGetString(parent, propertyName);
+        string? value = GetString(root, name);
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new V2BoardApiException(errorMessage);
+            throw new V2BoardApiException(ReadApiMessage(root, fallback));
         }
 
         return value;
     }
 
-    private static string? TryGetString(JsonElement parent, string propertyName)
+    private static string? GetString(JsonElement root, string name)
     {
-        if (!parent.TryGetProperty(propertyName, out JsonElement value))
+        if (!root.TryGetProperty(name, out JsonElement value))
         {
             return null;
         }
@@ -392,9 +391,9 @@ public sealed class V2BoardCommerceApi : IDisposable
         };
     }
 
-    private static int TryGetInt32(JsonElement parent, string propertyName, int fallback = 0)
+    private static int GetInt32(JsonElement root, string name, int fallback = 0)
     {
-        if (!parent.TryGetProperty(propertyName, out JsonElement value))
+        if (!root.TryGetProperty(name, out JsonElement value))
         {
             return fallback;
         }
@@ -410,9 +409,9 @@ public sealed class V2BoardCommerceApi : IDisposable
                 : fallback;
     }
 
-    private static int? TryGetNullableInt32(JsonElement parent, string propertyName)
+    private static int? GetNullableInt32(JsonElement root, string name)
     {
-        if (!parent.TryGetProperty(propertyName, out JsonElement value)
+        if (!root.TryGetProperty(name, out JsonElement value)
             || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
         {
             return null;
@@ -429,14 +428,12 @@ public sealed class V2BoardCommerceApi : IDisposable
                 : null;
     }
 
-    private static long TryGetInt64(JsonElement parent, string propertyName)
-    {
-        return TryGetNullableInt64(parent, propertyName) ?? 0;
-    }
+    private static long GetInt64(JsonElement root, string name) =>
+        GetNullableInt64(root, name) ?? 0;
 
-    private static long? TryGetNullableInt64(JsonElement parent, string propertyName)
+    private static long? GetNullableInt64(JsonElement root, string name)
     {
-        if (!parent.TryGetProperty(propertyName, out JsonElement value)
+        if (!root.TryGetProperty(name, out JsonElement value)
             || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
         {
             return null;
@@ -473,12 +470,38 @@ public sealed class V2BoardCommerceApi : IDisposable
 
     private static string ReadApiMessage(JsonElement root, string fallback)
     {
-        foreach (string property in new[] { "message", "msg" })
+        if (root.ValueKind != JsonValueKind.Object)
         {
-            string? value = TryGetString(root, property);
-            if (!string.IsNullOrWhiteSpace(value))
+            return fallback;
+        }
+
+        if (root.TryGetProperty("errors", out JsonElement errors)
+            && errors.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty error in errors.EnumerateObject())
             {
-                return value;
+                if (error.Value.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                string? first = error.Value.EnumerateArray()
+                    .Where(item => item.ValueKind == JsonValueKind.String)
+                    .Select(item => item.GetString())
+                    .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
+                if (!string.IsNullOrWhiteSpace(first))
+                {
+                    return first!;
+                }
+            }
+        }
+
+        foreach (string name in new[] { "message", "msg" })
+        {
+            string? message = GetString(root, name);
+            if (!string.IsNullOrWhiteSpace(message))
+            {
+                return message;
             }
         }
 
