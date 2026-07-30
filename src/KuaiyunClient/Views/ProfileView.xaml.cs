@@ -1,4 +1,5 @@
 using KuaiyunClient.Models;
+using KuaiyunClient.Services;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -6,6 +7,9 @@ namespace KuaiyunClient.Views;
 
 public partial class ProfileView : UserControl
 {
+    private readonly ClientSettingsService _settingsService = new();
+    private readonly LoginCredentialService _credentialService = new();
+
     public event EventHandler<ProfileAction>? ActionRequested;
 
     public ProfileView()
@@ -24,12 +28,26 @@ public partial class ProfileView : UserControl
             : "到期时间 --";
     }
 
-    private void MenuButton_Click(object sender, RoutedEventArgs e)
+    private async void MenuButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string tag }
             || !Enum.TryParse(tag, ignoreCase: true, out ProfileAction action))
         {
             return;
+        }
+
+        if (action == ProfileAction.Logout)
+        {
+            try
+            {
+                ClientSettings settings = await _settingsService.LoadAsync();
+                await _settingsService.SaveAsync(settings with { AutoLogin = false });
+                await _credentialService.DeleteAsync();
+            }
+            catch
+            {
+                // 退出账号仍由主窗口处理；清理自动登录失败不应阻止退出。
+            }
         }
 
         ActionRequested?.Invoke(this, action);
