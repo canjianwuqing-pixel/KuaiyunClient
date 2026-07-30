@@ -104,7 +104,7 @@ public sealed class V2BoardCommerceApi : IDisposable
         AppConfig config,
         UserSession session,
         int planId,
-        string cycle,
+        string period,
         CancellationToken cancellationToken = default)
     {
         if (planId <= 0)
@@ -112,9 +112,9 @@ public sealed class V2BoardCommerceApi : IDisposable
             throw new ArgumentOutOfRangeException(nameof(planId));
         }
 
-        if (string.IsNullOrWhiteSpace(cycle))
+        if (string.IsNullOrWhiteSpace(period))
         {
-            throw new ArgumentException("套餐周期不能为空。", nameof(cycle));
+            throw new ArgumentException("套餐周期不能为空。", nameof(period));
         }
 
         JsonElement root = await SendAcrossHostsAsync(
@@ -122,7 +122,7 @@ public sealed class V2BoardCommerceApi : IDisposable
             session,
             HttpMethod.Post,
             ["/user/order/save"],
-            new { plan_id = planId, cycle },
+            new { plan_id = planId, period },
             cancellationToken);
         return RequireString(root, "data", "创建订单成功，但后台未返回订单号。");
     }
@@ -185,13 +185,18 @@ public sealed class V2BoardCommerceApi : IDisposable
             checkout = wrapped;
         }
 
-        int type = TryGetInt32(checkout, "type");
+        int type = TryGetInt32(checkout, "type", TryGetInt32(root, "type"));
         string? data = TryGetString(checkout, "data");
         if (string.IsNullOrWhiteSpace(data)
-            && root.TryGetProperty("data", out JsonElement directData)
-            && directData.ValueKind == JsonValueKind.String)
+            && root.TryGetProperty("data", out JsonElement directData))
         {
-            data = directData.GetString();
+            data = directData.ValueKind switch
+            {
+                JsonValueKind.String => directData.GetString(),
+                JsonValueKind.True => "支付成功",
+                JsonValueKind.Number => directData.GetRawText(),
+                _ => null
+            };
         }
 
         if (string.IsNullOrWhiteSpace(data))
@@ -218,14 +223,24 @@ public sealed class V2BoardCommerceApi : IDisposable
         {
             foreach (string relativePath in relativePaths)
             {
+                Uri uri;
+                try
+                {
+                    uri = BuildApiUri(host, relativePath);
+                }
+                catch (Exception ex) when (ex is UriFormatException or ArgumentException)
+                {
+                    errors.Add($"{host}{relativePath}: 后台地址无效：{ex.Message}");
+                    continue;
+                }
+
                 try
                 {
                     JsonElement result = await SendJsonAsync(
                         config,
                         session,
-                        host,
+                        uri,
                         method,
-                        relativePath,
                         payload,
                         cancellationToken);
                     session.ApiHost = host;
@@ -237,7 +252,7 @@ public sealed class V2BoardCommerceApi : IDisposable
                 }
                 catch (Exception ex) when (IsRecoverable(ex, cancellationToken))
                 {
-                    errors.Add($"{host}{relativePath}: {ex.Message}");
+                    errors.Add($"{uri}: {ex.Message}");
                 }
             }
         }
@@ -251,13 +266,11 @@ public sealed class V2BoardCommerceApi : IDisposable
     private async Task<JsonElement> SendJsonAsync(
         AppConfig config,
         UserSession session,
-        string host,
+        Uri uri,
         HttpMethod method,
-        string relativePath,
         object? payload,
         CancellationToken cancellationToken)
     {
-        Uri uri = BuildApiUri(host, relativePath);
         using HttpRequestMessage request = new(method, uri);
         request.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
         request.Headers.TryAddWithoutValidation(
@@ -292,8 +305,15 @@ public sealed class V2BoardCommerceApi : IDisposable
             throw new V2BoardApiException("后台返回了空响应。");
         }
 
-        using JsonDocument document = JsonDocument.Parse(body);
-        return document.RootElement.Clone();
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(body);
+            return document.RootElement.Clone();
+        }
+        catch (JsonException ex)
+        {
+            throw new V2BoardApiException("后台返回的内容不是有效 JSON。", ex);
+        }
     }
 
     private static V2BoardPlan ParsePlan(JsonElement item)
@@ -371,7 +391,7 @@ public sealed class V2BoardCommerceApi : IDisposable
         string? value = TryGetString(parent, propertyName);
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new V2BoardApiException(errorMessage);
+            throw new V2BoardApiException(ReadApiMessage(parent, errorMessage));
         }
 
         return value;
@@ -473,6 +493,30 @@ public sealed class V2BoardCommerceApi : IDisposable
 
     private static string ReadApiMessage(JsonElement root, string fallback)
     {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return fallback;
+        }
+
+        if (root.TryGetProperty("errors", out JsonElement errors)
+            && errors.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty property in errors.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.Array)
+                {
+                    string? validationMessage = property.Value.EnumerateArray()
+                        .Where(item => item.ValueKind == JsonValueKind.String)
+                        .Select(item => item.GetString())
+                        .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+                    if (!string.IsNullOrWhiteSpace(validationMessage))
+                    {
+                        return validationMessage!;
+                    }
+                }
+            }
+        }
+
         foreach (string property in new[] { "message", "msg" })
         {
             string? value = TryGetString(root, property);
