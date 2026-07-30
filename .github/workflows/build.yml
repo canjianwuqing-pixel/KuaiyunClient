@@ -180,13 +180,13 @@ jobs:
       - name: Upload portable Windows package
         uses: actions/upload-artifact@v4
         with:
-          name: KuaiyunClient-v0.2.0-win-x64-portable
+          name: KuaiyunClient-v0.3.0-win-x64-portable
           path: artifacts/KuaiyunClient-win-x64/
           if-no-files-found: error
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: KuaiyunClient-v0.2.0-Setup
+          name: KuaiyunClient-v0.3.0-Setup
           path: artifacts/installer/KuaiyunClient-Setup.exe
           if-no-files-found: error
